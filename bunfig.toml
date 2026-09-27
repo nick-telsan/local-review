@@ -1,0 +1,11 @@
+[install]
+# Pin exact versions in package.json (no ^ranges).
+exact = true
+# Only install versions published at least 3 days ago (supply-chain safety).
+minimumReleaseAge = 259200 # seconds
+
+[test]
+# Thresholds apply when coverage is on (`bun run test`); focused `bun test <file>` runs skip them.
+coverageThreshold = { lines = 0.9, functions = 0.9 }
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["test/**"]

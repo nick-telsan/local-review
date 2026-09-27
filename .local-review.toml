@@ -1,0 +1,18 @@
+# Checks `lr review create` runs before opening a review round.
+# Each runs in a dedicated jj workspace, so your working copy is never touched.
+setup = "bun install --frozen-lockfile"
+
+[[checks]]
+name = "lint"
+run = "bun run lint"
+at = "tip"
+
+[[checks]]
+name = "typecheck"
+run = "bun run typecheck"
+at = "bookmarks"
+
+[[checks]]
+name = "test"
+run = "bun run test"
+at = "bookmarks"
