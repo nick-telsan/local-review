@@ -73,6 +73,12 @@ interface Actor {
 }
 ```
 
+Who's acting comes from `--as`, then `$LR_ACTOR`. Without either, lr checks whether a coding agent
+runs it (`$AI_AGENT`, or `CLAUDECODE=1` for Claude Code) and records that agent. Only outside any
+agent does it fall back to the OS user as a human. An agent that forgets `--as` can't record a
+human's verdict. The Claude Code plugin also asks the developer before an agent claims to be a
+human (see Claude Code integration).
+
 ### Feature
 
 ```ts
@@ -583,12 +589,33 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr final message <group> -F` · `lr final pr-body -F` · `lr final apply` | author agent   | finalization                                                                  |
 | `lr status [--json]`                                                     | anyone         | feature state + what's expected next                                          |
 | `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack (or adopt one already done); see Rebase                      |
+| `lr hook session-start\|pre-tool-use\|stop`                              | Claude Code    | hook handlers; see Claude Code integration                                    |
 | `lr feature clean <slug> [--purge]`                                      | developer      | clean up a done/abandoned feature (see below)                                 |
 | `lr repo relink <path>`                                                  | developer      | repair the repo key after the repo moves                                      |
 
 `lr feature clean` deletes phase bookmarks that still point where `lr` left them. Any bookmark that
 has moved since is skipped with a warning. It also forgets the jj workspaces and removes their
 directories. Review state is kept for history unless `--purge` is passed.
+
+### Claude Code integration
+
+`plugin/` is a Claude Code plugin, listed by the marketplace at the repo root. It has two skills,
+`lr-author` and `lr-review`, and three hooks. The skills and hooks also work installed on their own
+(skills in `~/.claude/skills/`, hooks in `settings.json`), so each hook is a plain shell command
+that calls `lr hook <event>` and does nothing if `lr` isn't on `PATH`. The logic lives in lr, where
+it's tested.
+
+- **SessionStart:** if the repo has lr state and one active feature, it prints the feature's status
+  and next step, which becomes session context. It also records the stack as the session found it.
+  Resume and compaction keep the same record.
+- **PreToolUse (Bash):** if a command runs lr as a human (`--as human:…`, `--as <name>`,
+  `LR_ACTOR=<human>`), it returns `ask` so the developer confirms.
+- **Stop:** if the feature is `implementing` or `revising`, and the stack differs from both how the
+  session found it and the latest round, it blocks the stop once (exit 2) with a reminder: open a
+  round with `lr review create`, or say what's left. It fires once per stack state, and never while
+  `stop_hook_active`. The plugin's `stop_reminder` option turns it off.
+
+Session records live in `<repo-key>/sessions/<session id>.json`.
 
 ## 6. Decisions log
 
@@ -598,6 +625,10 @@ directories. Review state is kept for history unless `--purge` is passed.
   ids; the review view uses interdiffs.
 - **Repo moves:** `lr repo relink`.
 - **Notes during implementation:** re-anchored at every `lr review create`.
+- **Agent by default inside agents:** lr defaults to the detected coding agent's identity rather
+  than the OS user. Your own `!` commands inside Claude Code therefore need `--as <you>`.
+- **The Stop reminder only fires for changes made in the session:** a session that didn't touch the
+  stack isn't asked about it.
 - **Re-anchoring state is relative to where the comment was made,** not the previous round, so
   "moved" always means "not where you left it". Outdated threads keep trying from their last good
   round rather than being dropped.

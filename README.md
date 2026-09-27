@@ -9,8 +9,8 @@ get squashed. The agent revises, and the loop repeats until the change is approv
 squashed into its final shape and handed off as a PR.
 
 > **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
-> handoff, threaded replies, and comments that follow the code from round to round. Finalization
-> (squashing, the PR body) and the UI are next. See [the design](docs/design/data-model.md).
+> handoff, threaded replies, comments that follow the code from round to round, and a Claude Code
+> plugin. Finalization (squashing, the PR body) and the UI are next. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -22,7 +22,13 @@ squashed into its final shape and handed off as a PR.
 ```sh
 bun install
 bun run build       # standalone binary at dist/lr; copy it onto your PATH
-# or run from source: bun run lr …
+```
+
+To track your checkout instead of a build, put a shim named `lr` on your `PATH`:
+
+```sh
+#!/bin/sh
+exec bun /path/to/local-review/src/bin.ts "$@"
 ```
 
 ```sh
@@ -39,8 +45,9 @@ lr threads                         # unsettled threads
 lr status
 ```
 
-Every command takes `--json`. Agents identify themselves with `--as agent:<name>` or
-`$LR_ACTOR`.
+Every command takes `--json`. Actors are `--as human:<name>` or `--as agent:<name>` (or
+`$LR_ACTOR`). Inside a coding agent such as Claude Code, lr defaults to that agent, so an agent
+can't approve as you by accident. In Claude Code's `!` commands, pass `--as <you>`.
 
 ### Plans
 
@@ -111,12 +118,50 @@ triage_agent_comments = true
 
 State lives in `~/.local-review/` (override with `$LOCAL_REVIEW_HOME`).
 
+## Claude Code
+
+[`plugin/`](plugin) is a Claude Code plugin with two skills and three hooks. It needs `lr` on your
+`PATH`.
+
+- **`lr-author`** (skill) walks through the author's side: planning, implementing (a change per
+  task, a bookmark per phase), opening rounds, and revising from `lr handoff`.
+- **`lr-review`** (skill) reviews a round as an agent. Run it in a separate session or subagent
+  with `/local-review:lr-review`.
+- **SessionStart** (hook) tells Claude which feature lr is tracking and what's next, including after
+  `/clear` and compaction.
+- **PreToolUse** (hook) asks you before Claude runs lr as a human (`--as human:…`).
+- **Stop** (hook): if Claude changed the stack during the session and stops without opening a round,
+  it gets one reminder to run `lr review create` or say what's left. Turn it off with the plugin's
+  `stop_reminder` option in `/config`.
+
+### As a plugin
+
+```sh
+claude plugin marketplace add /path/to/local-review
+claude plugin install local-review@local-review
+```
+
+### Skills and hooks on their own
+
+The skills are plain skill directories. Link or copy the ones you want:
+
+```sh
+ln -s /path/to/local-review/plugin/skills/lr-author ~/.claude/skills/lr-author
+ln -s /path/to/local-review/plugin/skills/lr-review ~/.claude/skills/lr-review
+```
+
+Each hook in [`plugin/hooks/hooks.json`](plugin/hooks/hooks.json) stands alone. Copy the ones you
+want into the `hooks` object of `~/.claude/settings.json`, or into a project's
+`.claude/settings.json`.
+
 ## Development
 
 ```sh
 bun run check       # lint + typecheck + tests with coverage (≥90% lines and functions, per file)
 bun run fix         # format and apply safe lint fixes
 bun test test/snapshot.test.ts   # one file, no coverage thresholds
+claude plugin validate . && claude plugin validate plugin
+claude --plugin-dir plugin       # try the plugin without installing it
 ```
 
 ## License

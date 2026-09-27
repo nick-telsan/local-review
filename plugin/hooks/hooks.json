@@ -1,0 +1,39 @@
+{
+  "description": "local-review: feature context at session start, a check before an agent acts as a human, and a reminder to open a review round. Each hook does nothing if lr isn't on PATH.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v lr >/dev/null 2>&1 || exit 0; exec lr hook session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v lr >/dev/null 2>&1 || exit 0; exec lr hook pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v lr >/dev/null 2>&1 || exit 0; exec lr hook stop",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

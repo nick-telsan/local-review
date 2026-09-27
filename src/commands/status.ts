@@ -1,5 +1,5 @@
 import type { Context } from "../context.ts";
-import type { FeatureStatus } from "../model.ts";
+import type { Feature, FeatureStatus, Round } from "../model.ts";
 import { loadHandoff } from "./handoff.ts";
 import { describeStack } from "./review.ts";
 
@@ -55,13 +55,17 @@ export async function status(ctx: Context): Promise<number> {
     ([s, ts]) => `${ts!.length} ${s}`,
   );
   if (byStatus.length) lines.push(`Threads: ${byStatus.join(", ")}`);
-  // Agent reviewers can hand work back before any human verdict moves the feature along.
-  const next =
-    feature.status === "in_review" && round && loadHandoff(ctx, feature, round).ready
-      ? "agent reviewers requested changes: read `lr handoff`"
-      : NEXT[feature.status];
+  const next = nextStep(ctx, feature, round);
   lines.push(`Next: ${next}`);
 
   ctx.print({ feature, plan, round, checks, reviews, threads, next }, lines);
   return 0;
+}
+
+/** What the feature is waiting on, as a short instruction. */
+export function nextStep(ctx: Context, feature: Feature, round: Round | null): string {
+  // Agent reviewers can hand work back before any human verdict moves the feature along.
+  return feature.status === "in_review" && round && loadHandoff(ctx, feature, round).ready
+    ? "agent reviewers requested changes: read `lr handoff`"
+    : NEXT[feature.status];
 }

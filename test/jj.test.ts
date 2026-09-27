@@ -59,18 +59,29 @@ describe("paths", () => {
 
 describe("actors", () => {
   const env = { ...process.env };
+  const VARS = ["LR_ACTOR", "USER", "CLAUDECODE", "AI_AGENT"] as const;
+  beforeEach(() => {
+    for (const v of VARS) delete process.env[v];
+  });
   afterEach(() => {
-    process.env.LR_ACTOR = env.LR_ACTOR;
-    process.env.USER = env.USER;
-    if (env.LR_ACTOR === undefined) delete process.env.LR_ACTOR;
+    for (const v of VARS) {
+      if (env[v] === undefined) delete process.env[v];
+      else process.env[v] = env[v];
+    }
   });
 
-  test("flag, then $LR_ACTOR, then $USER", () => {
+  test("flag, then $LR_ACTOR, then a detected agent, then $USER", () => {
     process.env.LR_ACTOR = "agent:codex";
     process.env.USER = "nick";
+    process.env.CLAUDECODE = "1";
     expect(resolveActor("agent:claude-code")).toEqual({ kind: "agent", name: "claude-code" });
     expect(resolveActor(undefined)).toEqual({ kind: "agent", name: "codex" });
     delete process.env.LR_ACTOR;
+    expect(resolveActor(undefined)).toEqual({ kind: "agent", name: "claude-code" });
+    process.env.AI_AGENT = "cursor_1-2_agent";
+    expect(resolveActor(undefined)).toEqual({ kind: "agent", name: "cursor" });
+    delete process.env.CLAUDECODE;
+    delete process.env.AI_AGENT;
     expect(resolveActor(undefined)).toEqual({ kind: "human", name: "nick" });
   });
 

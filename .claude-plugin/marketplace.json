@@ -1,0 +1,12 @@
+{
+  "name": "local-review",
+  "description": "Claude Code integration for local-review (lr), a local code review loop on jj.",
+  "owner": { "name": "Nick Telsan" },
+  "plugins": [
+    {
+      "name": "local-review",
+      "source": "./plugin",
+      "description": "Skills and hooks for planning, implementing, reviewing, and revising jj stacks with lr."
+    }
+  ]
+}

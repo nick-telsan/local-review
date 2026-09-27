@@ -1,0 +1,16 @@
+{
+  "name": "local-review",
+  "version": "0.1.0",
+  "description": "Skills and hooks for local-review (lr): plan, implement, review, and revise jj stacks with agent and human reviewers. Needs the lr CLI on your PATH.",
+  "author": { "name": "Nick Telsan" },
+  "license": "Unlicense",
+  "keywords": ["jj", "code-review", "agents"],
+  "userConfig": {
+    "stop_reminder": {
+      "type": "boolean",
+      "title": "Remind Claude to open a review round",
+      "description": "When Claude stops with changes on the feature's stack that no review round has seen, remind it once to run `lr review create` (or say what's left).",
+      "default": true
+    }
+  }
+}

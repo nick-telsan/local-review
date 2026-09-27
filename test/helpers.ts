@@ -17,6 +17,9 @@ export class TestRepo {
     process.env.LOCAL_REVIEW_HOME = join(tmp, "home");
     delete process.env.LR_FEATURE;
     delete process.env.LR_ACTOR;
+    // Tests may run inside a coding agent, which lr would otherwise detect as the actor.
+    delete process.env.CLAUDECODE;
+    delete process.env.AI_AGENT;
 
     const root = join(tmp, "repo");
     await run(["jj", "git", "init", root], tmp);

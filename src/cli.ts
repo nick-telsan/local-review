@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { featureList, featureStart } from "./commands/feature.ts";
 import { handoff } from "./commands/handoff.ts";
+import { HOOK_EVENTS, hook } from "./commands/hook.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
 import { reviewCreate } from "./commands/review.ts";
 import { status } from "./commands/status.ts";
@@ -24,11 +25,14 @@ Usage:
   lr threads [--status <s,…> | --all]
   lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]
   lr status
+  lr hook ${HOOK_EVENTS.join("|")}
+                                  Claude Code hook handlers (hook JSON on stdin)
 
 Global options:
   -R, --repo <path>     repository (default: current directory)
   --feature <slug>      feature to act on (default: $LR_FEATURE, or the only active one)
-  --as <actor>          who is acting: human:<name> | agent:<name> (default: $LR_ACTOR, or $USER)
+  --as <actor>          who is acting: human:<name> | agent:<name> (default: $LR_ACTOR, else
+                        agent:<name> inside a coding agent such as Claude Code, else $USER)
   --json                machine-readable output
 `;
 
@@ -120,6 +124,9 @@ const COMMANDS: Record<string, Handler> = {
   },
 };
 
+/** Every command, as typed after `lr` (skills are tested against this list). */
+export const COMMAND_NAMES = [...Object.keys(COMMANDS), "hook"];
+
 const FILE = { file: { type: "string", short: "F" } } as const;
 
 type Options = NonNullable<Parameters<typeof parseArgs>[0]>["options"];
@@ -134,6 +141,14 @@ function parse<T extends Options>(args: string[], options: T) {
 }
 
 export async function main(argv: string[], io: Io): Promise<number> {
+  // Hooks run in any directory Claude Code is in, so they find (or skip) the repo themselves.
+  if (argv[0] === "hook") {
+    return guarded(io, async () => {
+      const { values, positionals } = parse(argv.slice(1), {});
+      return hook(positionals[0], io, values.repo);
+    });
+  }
+
   // The command comes first: `lr <group> <verb> [options]` or `lr <verb> [options]`.
   const name = [argv.slice(0, 2).join(" "), argv[0] ?? ""].find((n) => n in COMMANDS);
   const wantsHelp =
@@ -145,19 +160,29 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const rest = argv.slice(name.split(" ").length);
 
-  let ctx: Context | undefined;
-  try {
+  return guarded(io, async () => {
     const { values } = parseArgs({
       args: rest,
       options: GLOBAL,
       allowPositionals: true,
       strict: false,
     });
-    ctx = await Context.create(
+    const ctx = await Context.create(
       values as { repo?: string; feature?: string; as?: string; json?: boolean },
       io,
     );
-    return await COMMANDS[name]!(ctx, rest);
+    try {
+      return await COMMANDS[name]!(ctx, rest);
+    } finally {
+      ctx.close();
+    }
+  });
+}
+
+/** Run a command, turning user-facing errors into a message and an exit code. */
+async function guarded(io: Io, run: () => Promise<number>): Promise<number> {
+  try {
+    return await run();
   } catch (e) {
     if (e instanceof LrError) {
       io.err(`error: ${e.message}`);
@@ -168,7 +193,5 @@ export async function main(argv: string[], io: Io): Promise<number> {
       return 2;
     }
     throw e;
-  } finally {
-    ctx?.close();
   }
 }

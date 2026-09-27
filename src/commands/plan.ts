@@ -54,7 +54,16 @@ export async function planShow(ctx: Context): Promise<number> {
   if (ctx.json) {
     ctx.print({ plan: { ...plan, path } }, "");
   } else {
-    ctx.io.out(await Bun.file(path).text());
+    // Bookmarks can be defaulted in the file, so spell them out: the author sets them.
+    const phases = plan.phases.map((p) => `  ${p.id}. ${p.title}  →  bookmark ${p.bookmark}`);
+    ctx.io.out(
+      [
+        `Plan v${plan.version} for ${feature.slug}`,
+        ...phases,
+        "",
+        await Bun.file(path).text(),
+      ].join("\n"),
+    );
   }
   return 0;
 }

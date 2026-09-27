@@ -45,6 +45,14 @@ need so far.
   index is known to exist; don't paper over it with `?.`.
 - Biome formats: 2 spaces, 100 columns, double quotes.
 
+## Claude Code plugin
+
+`plugin/` holds the skills and hooks, and `.claude-plugin/marketplace.json` lists it. Hooks are
+thin shell commands that call `lr hook <event>`, so their logic stays in `src/commands/hook.ts`,
+where it's tested. `test/plugin.test.ts` checks the skills against the CLI: every `lr` command they
+mention must exist, and their example plan and review must pass lr's validators. After editing the
+plugin, run `claude plugin validate . && claude plugin validate plugin`.
+
 ## Tests
 
 - Tests run against **real jj repos** (`TestRepo` in `test/helpers.ts`), with an isolated

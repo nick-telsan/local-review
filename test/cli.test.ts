@@ -122,7 +122,10 @@ describe("lr plan", () => {
   test("show prints the current plan", async () => {
     expect((await lr(repo, "plan", "show")).err).toContain("has no plan yet");
     await lr(repo, "plan", "submit", "-F", planFile, "--as", "agent:claude-code");
-    expect((await lr(repo, "plan", "show")).out).toBe(TWO_PHASE_PLAN);
+    expect((await lr(repo, "plan", "show")).out).toBe(
+      "Plan v1 for feat\n  1. Schema  →  bookmark feat/1-schema\n  2. Rotation  →  bookmark feat/2-rotation\n\n" +
+        TWO_PHASE_PLAN,
+    );
     const { data } = await lrJson<{ plan: PlanVersion }>(repo, "plan", "show");
     expect(data.plan.createdBy).toEqual({ kind: "agent", name: "claude-code" });
     expect(await Bun.file(data.plan.path).text()).toBe(TWO_PHASE_PLAN);
@@ -131,7 +134,7 @@ describe("lr plan", () => {
   test("submit reads the plan from stdin with -F -", async () => {
     const r = await lrWithStdin(repo, TWO_PHASE_PLAN, "plan", "submit", "-F", "-");
     expect(r.code).toBe(0);
-    expect((await lr(repo, "plan", "show")).out).toBe(TWO_PHASE_PLAN);
+    expect((await lr(repo, "plan", "show")).out).toEndWith(TWO_PHASE_PLAN);
   });
 
   test("status before any round", async () => {
