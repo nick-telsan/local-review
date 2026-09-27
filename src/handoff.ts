@@ -24,6 +24,8 @@ export interface HandoffSection {
 export interface Handoff {
   feature: string;
   round: number;
+  /** A final round reviews the squash groups, their messages, and the PR body. */
+  kind: Round["kind"];
   planVersion: number;
   verdict: Verdict;
   /** A human's verdict, or changes requested by agent reviewers when no human has decided. */
@@ -82,6 +84,7 @@ export function buildHandoff(input: {
     handoff: {
       feature: input.feature.slug,
       round: round.n,
+      kind: round.kind,
       planVersion: round.planVersion,
       verdict,
       decidedBy,
@@ -90,7 +93,7 @@ export function buildHandoff(input: {
       failingChecks,
       threads,
       sections,
-      nextSteps: nextSteps(verdict, threads.length, failingChecks.length),
+      nextSteps: nextSteps(round.kind, verdict, threads.length, failingChecks.length),
     },
   };
 }
@@ -110,6 +113,10 @@ function groupThreads(
 
   const general = take((a) => a.kind === "feature");
   if (general.length) sections.push({ title: "General", depth: 2, threads: general });
+  const finals = take((a) => a.kind === "final");
+  if (finals.length) sections.push({ title: "Final commit messages", depth: 2, threads: finals });
+  const prBody = take((a) => a.kind === "pr_body");
+  if (prBody.length) sections.push({ title: "PR body", depth: 2, threads: prBody });
 
   const changeSections = (phaseId: number | null) =>
     changes
@@ -149,21 +156,37 @@ function groupThreads(
 
 /** Change-level comments first, then the message, then code by file and line. */
 function byLocation(a: Thread, b: Thread): number {
-  const rank = { feature: 0, phase: 0, change: 0, message: 1, code: 2 } as const;
+  const rank = { feature: 0, phase: 0, change: 0, message: 1, final: 1, pr_body: 1, code: 2 };
   const ra = rank[a.anchor.kind];
   const rb = rank[b.anchor.kind];
   if (ra !== rb) return ra - rb;
   if (a.anchor.kind === "code" && b.anchor.kind === "code") {
     return a.anchor.path.localeCompare(b.anchor.path) || a.anchor.lines[0] - b.anchor.lines[0];
   }
+  if (a.anchor.kind === "final" && b.anchor.kind === "final") {
+    return a.anchor.groupId.localeCompare(b.anchor.groupId) || a.id - b.id;
+  }
   return a.id - b.id;
 }
 
-function nextSteps(verdict: Verdict, open: number, failing: number): string[] {
+function nextSteps(kind: Round["kind"], verdict: Verdict, open: number, failing: number): string[] {
+  if (kind === "final") {
+    if (verdict === "approved" && open === 0) {
+      return ["The final commits are approved. Run `lr final apply` to squash the stack."];
+    }
+    return [
+      "Edit the drafts the threads are on: `lr final message <group> -F <file>` or " +
+        "`lr final pr-body -F <file>` (`lr final show` has the current text).",
+      'Reply to every thread: `lr reply <id> --addressed "<what changed>"`, or ' +
+        '`lr reply <id> "<why not>"` to push back.',
+      "Run `lr review create --final` for the next final round.",
+    ];
+  }
   if (verdict === "approved" && open === 0) {
     return [
-      "Approved with nothing left to address. Finalization (squashing and the PR body) isn't " +
-        "in lr yet, so stop here and tell the developer.",
+      "Approved with nothing left to address. Finalize: read `lr final show --json`, draft a " +
+        "message for each final commit (`lr final message <group> -F <file>`) and the PR body " +
+        "(`lr final pr-body -F <file>`), then run `lr review create --final`.",
     ];
   }
   return [
@@ -192,7 +215,10 @@ export function renderHandoff(h: Handoff): string {
         : "approved"
       : "changes requested";
 
-  out.push(`# Review handoff: ${h.feature}, round ${h.round}`, "");
+  out.push(
+    `# Review handoff: ${h.feature}, ${h.kind === "final" ? "final " : ""}round ${h.round}`,
+    "",
+  );
   out.push(
     `**Verdict:** ${verdict}${h.decidedBy === "agents" ? " (by agent reviewers; no human verdict yet)" : ""}  `,
   );
@@ -224,24 +250,31 @@ export function renderHandoff(h: Handoff): string {
 
 function renderThread(t: Thread, depth: number): string[] {
   const a = t.anchor;
+  const lineRef = (l: [number, number] | null) =>
+    l ? `, line${l[0] === l[1] ? "" : "s"} ${formatLines(l)}` : "";
   const where =
     a.kind === "code"
       ? `\`${a.path}:${formatLines(a.lines)}\` (${a.side})`
       : a.kind === "message"
-        ? `commit message${a.lines ? `, line${a.lines[0] === a.lines[1] ? "" : "s"} ${formatLines(a.lines)}` : ""}`
-        : null;
+        ? `commit message${lineRef(a.lines)}`
+        : a.kind === "final"
+          ? `final commit ${a.groupId}${lineRef(a.lines)}`
+          : a.kind === "pr_body"
+            ? `PR body${lineRef(a.lines)}`
+            : null;
   const outdated = t.anchorState === "outdated";
   const title = [`#${t.id}`, t.severity, where, outdated && "outdated"].filter(Boolean).join(" · ");
   const out = [`${"#".repeat(Math.min(depth, 6))} ${title}`, ""];
 
-  if (outdated && (a.kind === "code" || a.kind === "message")) {
+  const hasText = a.kind === "message" || a.kind === "final" || a.kind === "pr_body";
+  if (outdated && (a.kind === "code" || hasText)) {
     out.push(`_This changed after round ${t.anchorRound}. As it was then:_`, "");
   }
   if (a.kind === "code") {
     const width = String(a.lines[1]).length;
     const numbered = a.snippet.map((l, i) => `${String(a.lines[0] + i).padStart(width)} | ${l}`);
     out.push(...fenced(numbered.join("\n"), lang(a.path)), "");
-  } else if (a.kind === "message" && (a.lines || outdated)) {
+  } else if (hasText && (a.lines || outdated)) {
     out.push(...fenced(a.snippet.join("\n"), ""), "");
   }
 

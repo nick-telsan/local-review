@@ -9,8 +9,8 @@ get squashed. The agent revises, and the loop repeats until the change is approv
 squashed into its final shape and handed off as a PR.
 
 > **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
-> handoff, threaded replies, comments that follow the code from round to round, and a Claude Code
-> plugin. Finalization (squashing, the PR body) and the UI are next. See [the design](docs/design/data-model.md).
+> handoff, threaded replies, comments that follow the code from round to round, finalization
+> (squashing and the PR body), and a Claude Code plugin. The UI is next. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -43,6 +43,13 @@ lr reply 12 --addressed "Added NOT NULL in kxqp"         # author
 lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads
 lr status
+
+# once you've approved with nothing open:
+lr final show                      # final commits: one per phase (lr final cut <change> splits one)
+lr final message 1 -F msg.txt      # draft each final commit's message…
+lr final pr-body -F pr.md          # …and the PR body (or edit the files lr final show lists)
+lr review create --final           # review the messages and PR body; approve with review submit
+lr final apply                     # squash the stack exactly as approved (undo: jj op restore)
 ```
 
 Every command takes `--json`. Actors are `--as human:<name>` or `--as agent:<name>` (or
@@ -108,6 +115,15 @@ timeout = "10m"       # default 10m
 
 Checks run in a separate jj workspace, so your working copy is never touched. A passing result
 is reused as long as the commit and the command haven't changed.
+
+For drafting final commit messages and the PR body, point lr at your guidelines. The PR template
+defaults to `.github/pull_request_template.md`:
+
+```toml
+[final]
+commit_guidelines = "docs/commit-messages.md"
+pr_template = ".github/pull_request_template.md"
+```
 
 To require a human to accept agent reviewers' comments before they reach the author:
 

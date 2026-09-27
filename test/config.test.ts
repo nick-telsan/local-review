@@ -21,6 +21,7 @@ describe("loadRepoConfig", () => {
       setup: null,
       checks: [],
       review: { triageAgentComments: false },
+      final: { commitGuidelines: null, prTemplate: null },
     });
   });
 
@@ -45,6 +46,7 @@ run = "bun run lint"
         { name: "lint", run: "bun run lint", at: "tip", timeoutMs: 600_000 },
       ],
       review: { triageAgentComments: false },
+      final: { commitGuidelines: null, prTemplate: null },
     });
   });
 
@@ -88,6 +90,16 @@ run = "x"
       /must be true or false/,
     );
     await expect(load('review = "x"\n')).rejects.toThrow(/must be a table/);
+  });
+
+  test("final settings", async () => {
+    await expect(load('final = "x"\n')).rejects.toThrow(/final: must be a table/);
+    await expect(load("[final]\ncommit_guidelines = 3\n")).rejects.toThrow(
+      /final.commit_guidelines: must be a path/,
+    );
+    await expect(load('[final]\npr_template = "nope.md"\n')).rejects.toThrow(
+      /final.pr_template: nope.md doesn't exist/,
+    );
   });
 
   test("rejects checks that aren't an array of tables", async () => {

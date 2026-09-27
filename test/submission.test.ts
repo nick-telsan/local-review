@@ -36,6 +36,8 @@ describe("parseSubmission", () => {
       lines: null,
       side: "new",
       message: false,
+      final: null,
+      prBody: false,
       severity: null,
       body: "general",
       suggestion: null,
@@ -106,5 +108,32 @@ describe("parseSubmission", () => {
     expect(message).toContain("comments[3]: a file comment needs lines");
     expect(message).toContain("comments[4]: lines only apply");
     expect(message).toContain("comments[5]: a suggestion replaces specific lines");
+  });
+
+  test("final and pr_body comments", () => {
+    const { comments } = parseSubmission({
+      comments: [
+        { final: 2, lines: 1, body: "x" },
+        { pr_body: true, body: "y" },
+      ],
+    });
+    expect(comments.map((c) => [c.final, c.prBody, c.lines])).toEqual([
+      ["2", false, [1, 1]],
+      [null, true, null],
+    ]);
+    const message = problemsOf({
+      comments: [
+        { body: "x", final: "" },
+        { body: "x", pr_body: "yes" },
+        { body: "x", final: "1", change: "k" },
+        { body: "x", final: "1", pr_body: true },
+      ],
+    });
+    expect(message).toContain("comments[0].final: must be a final commit's group id");
+    expect(message).toContain("comments[1].pr_body: must be true or false");
+    expect(message).toContain("comments[2]: final and pr_body comments stand alone");
+    expect(message).toContain(
+      "comments[3]: a comment is on a final commit or the PR body, not both",
+    );
   });
 });

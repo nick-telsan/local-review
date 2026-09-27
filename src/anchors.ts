@@ -22,7 +22,8 @@ export class AnchorResolver {
   }
 
   async resolve(c: CommentInput): Promise<Anchor> {
-    const change = c.change === null ? null : this.findChange(c.change);
+    if (c.final !== null || c.prBody) return this.finalAnchor(c);
+    const change = c.change === null ? null : findChange(this.round, c.change);
 
     if (c.message) {
       return this.messageAnchor(change!, c.lines);
@@ -39,17 +40,35 @@ export class AnchorResolver {
     return { kind: "feature" };
   }
 
-  /** A full change id or a unique prefix of one in this round. */
-  private findChange(prefix: string): ChangeSnapshot {
-    const matches = this.round.changes.filter((c) => c.changeId.startsWith(prefix));
-    if (matches.length === 1) return matches[0]!;
-    const available = this.round.changes.map((c) => c.changeId.slice(0, 8)).join(", ");
-    if (matches.length === 0) {
+  /** A comment on a final commit's message or on the PR body, as frozen in a final round. */
+  private finalAnchor(c: CommentInput): Anchor {
+    const final = this.round.final;
+    if (!final) {
       throw new LrError(
-        `change "${prefix}" isn't in round ${this.round.n} (changes: ${available})`,
+        `round ${this.round.n} reviews code; final and pr_body comments need a final round`,
       );
     }
-    throw new LrError(`change "${prefix}" is ambiguous in round ${this.round.n}`);
+    let text: string;
+    let what: string;
+    if (c.final !== null) {
+      const group = final.groups.find((g) => g.id === c.final);
+      if (!group) {
+        throw new LrError(
+          `no final commit "${c.final}" in round ${this.round.n} (groups: ${final.groups.map((g) => g.id).join(", ")})`,
+        );
+      }
+      text = group.message;
+      what = `the message of final commit ${group.id}`;
+    } else {
+      text = final.prBody;
+      what = "the PR body";
+    }
+    const lines = splitLines(text);
+    if (c.lines) checkRange(c.lines, lines.length, what);
+    const snippet = c.lines ? lines.slice(c.lines[0] - 1, c.lines[1]) : lines;
+    return c.final !== null
+      ? { kind: "final", groupId: c.final, lines: c.lines, snippet }
+      : { kind: "pr_body", lines: c.lines, snippet };
   }
 
   private phaseChanges(phaseId: number): ChangeSnapshot[] {
@@ -151,6 +170,17 @@ export class AnchorResolver {
 
 type Stack = Pick<Round, "baseCommitId" | "changes">;
 
+/** A full change id, or a unique prefix of one, in a round. */
+export function findChange(round: Pick<Round, "n" | "changes">, prefix: string): ChangeSnapshot {
+  const matches = round.changes.filter((c) => c.changeId.startsWith(prefix));
+  if (matches.length === 1) return matches[0]!;
+  const available = round.changes.map((c) => c.changeId.slice(0, 8)).join(", ");
+  if (matches.length === 0) {
+    throw new LrError(`change "${prefix}" isn't in round ${round.n} (changes: ${available})`);
+  }
+  throw new LrError(`change "${prefix}" is ambiguous in round ${round.n}`);
+}
+
 /** Position of a ref in a round's stack; the base is -1, and a change not in it is -1 too. */
 export function refIndex(round: Stack, ref: RevRef): number {
   return ref === "base" ? -1 : round.changes.findIndex((c) => c.changeId === ref.changeId);
@@ -213,5 +243,9 @@ export function describeAnchor(anchor: Anchor): string {
       return `message of ${anchor.changeId.slice(0, 8)}${anchor.lines ? `:${range(anchor.lines)}` : ""}`;
     case "code":
       return `${anchor.path}:${range(anchor.lines)}${anchor.side === "old" ? " (old)" : ""} @${anchor.changeId.slice(0, 8)}`;
+    case "final":
+      return `final ${anchor.groupId}${anchor.lines ? `:${range(anchor.lines)}` : ""}`;
+    case "pr_body":
+      return `PR body${anchor.lines ? `:${range(anchor.lines)}` : ""}`;
   }
 }

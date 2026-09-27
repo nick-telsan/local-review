@@ -1,6 +1,6 @@
 ---
 name: lr-author
-description: Author workflow for local-review (lr), a local code review loop on jj. Use when planning, implementing, or revising a feature that lr tracks. That covers writing the phased plan, committing one change per task with a bookmark per phase, opening review rounds with `lr review create`, and acting on `lr handoff` by amending changes and replying to threads. Also use when the session context says lr is tracking the repo, or the user asks to start a feature with lr.
+description: Author workflow for local-review (lr), a local code review loop on jj. Use when planning, implementing, or revising a feature that lr tracks. That covers writing the phased plan, committing one change per task with a bookmark per phase, opening review rounds with `lr review create`, acting on `lr handoff` by amending changes and replying to threads, and finalizing (drafting the final commit messages and PR body, then `lr final apply`). Also use when the session context says lr is tracking the repo, or the user asks to start a feature with lr.
 ---
 
 # Authoring a feature with local-review
@@ -109,8 +109,33 @@ A thread marked **outdated** points at code or a message that changed after the 
 The handoff shows it as it was then. Check whether your change already dealt with it, and reply
 either way.
 
-## 5. Approved
+## 5. Finalize
 
-Approved with nothing open means review is done. Finalization (squashing to one commit per phase,
-drafting the PR body) isn't in lr yet, so stop and tell the developer. Approved with open threads
-means: address them, then run `lr review create` for one last look.
+Once the developer approves a round with nothing open, the feature is `finalizing`. If they approved
+with open threads, address those and run `lr review create` first. Finalizing turns the stack
+into the commits of the PR: by default one per phase, each with a message you write, plus the PR
+body.
+
+1. **Read `lr final show --json`.** It lists each final commit (group) with its changes and their
+   messages. It also includes the repo's commit guidelines and PR template if it has them. Follow
+   them.
+2. **Draft a message for each group:**
+   `lr final message <group> -F - <<'EOF' … EOF`. Write it for the finished commit, not as a list of
+   the changes it's made of: an imperative subject of 72 characters at most, a blank line, then a
+   body that says what the commit does and why. Keep trailers only if the repo uses them.
+3. **Draft the PR body** with `lr final pr-body -F -`: what the PR does and why, how it was tested,
+   and anything reviewers should know. Follow the PR template if there is one.
+4. **Open the final round** with `lr review create --final`. It freezes the grouping, the messages,
+   and the PR body for review. It refuses if the stack changed since the approval, a draft is
+   missing, or a thread is still open.
+5. **If changes are requested,** `lr handoff` shows threads on the messages and the PR body. Redraft
+   (`lr final message` / `lr final pr-body`), reply to each thread, and run
+   `lr review create --final` again.
+6. **Once the developer approves the final round,** run `lr final apply`. It squashes each group into
+   its last change (which keeps the phase bookmark) with the approved message, and checks the
+   result matches what was approved. Then tell the developer it's ready to push. Only push or open
+   the PR if they asked you to.
+
+Only the developer decides how a phase is split: `lr final cut <change>` starts a new final commit at
+that change. Don't edit the drafts after the final round is approved. lr refuses to apply drafts
+that differ from what was approved.

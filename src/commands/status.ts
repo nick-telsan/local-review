@@ -9,9 +9,12 @@ const NEXT: Record<FeatureStatus, string> = {
     "implement the plan (one commit per task, a bookmark per phase), then `lr review create`",
   in_review: "waiting on reviews",
   revising: "work through `lr handoff`, then `lr review create`",
-  finalizing: "address any open threads in `lr handoff`; finalization isn't in lr yet",
+  finalizing:
+    "address any open threads in `lr handoff`, then draft the final commits (`lr final show`) " +
+    "and run `lr review create --final`",
   final_review: "waiting on final review",
-  done: "nothing — feature is done",
+  approved: "run `lr final apply` to squash the stack",
+  done: "nothing — the stack is squashed; push it and open the PR",
   abandoned: "nothing — feature was abandoned",
 };
 

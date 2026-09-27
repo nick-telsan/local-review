@@ -68,7 +68,12 @@ export class Reanchorer {
 
   /** Where `thread`, anchored in `from`, stands in the new round. */
   async place(thread: Thread, from: Round): Promise<Placement> {
-    const anchor = await this.follow(thread.anchor, from);
+    const a = thread.anchor;
+    // Comments on final messages wait out code rounds, which have no messages to map them onto.
+    if ((a.kind === "final" || a.kind === "pr_body") && !this.to.final) {
+      return { anchor: a, anchorRound: from.n, anchorState: thread.anchorState };
+    }
+    const anchor = await this.follow(a, from);
     if (!anchor) return { anchor: thread.anchor, anchorRound: from.n, anchorState: "outdated" };
     const state = sameLocation(anchor, thread.originalAnchor) ? "current" : "moved";
     return { anchor, anchorRound: this.to.n, anchorState: state };
@@ -88,6 +93,15 @@ export class Reanchorer {
         return this.message(a, from);
       case "code":
         return this.code(a, from);
+      case "final": {
+        const group = this.to.final!.groups.find((g) => g.id === a.groupId);
+        const placed = group && followLines(splitLines(group.message), a.lines, a.snippet);
+        return placed ? { ...a, ...placed } : null;
+      }
+      case "pr_body": {
+        const placed = followLines(splitLines(this.to.final!.prBody), a.lines, a.snippet);
+        return placed && { ...a, ...placed };
+      }
     }
   }
 
@@ -117,17 +131,8 @@ export class Reanchorer {
 
   private async message(a: MessageAnchor, from: Round): Promise<MessageAnchor | null> {
     const c = await this.change(a.changeId, from);
-    if (!c) return null;
-    const text = splitLines(c.description);
-    let lines = a.lines;
-    if (lines === null) {
-      // A comment on the whole message is outdated by any rewording.
-      if (!sameLines(text, a.snippet)) return null;
-    } else if (!sameLines(text.slice(lines[0] - 1, lines[1]), a.snippet)) {
-      lines = findLines(text, a.snippet);
-      if (!lines) return null;
-    }
-    return { ...a, changeId: c.changeId, commitId: c.commitId, lines };
+    const placed = c && followLines(splitLines(c.description), a.lines, a.snippet);
+    return placed ? { ...a, changeId: c!.changeId, commitId: c!.commitId, ...placed } : null;
   }
 
   private async code(a: CodeAnchor, from: Round): Promise<CodeAnchor | null> {
@@ -200,6 +205,22 @@ export function mapRange(hunks: Hunk[], [first, last]: [number, number]): [numbe
   return [first + shift, last + shift];
 }
 
+/**
+ * Where commented lines of a text (a message, the PR body) are now. A comment on the whole text
+ * (`lines` null) is outdated by any change to it. Specific lines stay put if they're unchanged
+ * there, or move to the one place they appear. null means outdated.
+ */
+function followLines(
+  text: string[],
+  lines: [number, number] | null,
+  snippet: string[],
+): { lines: [number, number] | null } | null {
+  if (lines === null) return sameLines(text, snippet) ? { lines: null } : null;
+  if (sameLines(text.slice(lines[0] - 1, lines[1]), snippet)) return { lines };
+  const found = findLines(text, snippet);
+  return found && { lines: found };
+}
+
 /** The 1-based range where `snippet` appears in `text`, if it appears exactly once. */
 export function findLines(text: string[], snippet: string[]): [number, number] | null {
   if (snippet.length === 0) return null;
@@ -224,6 +245,10 @@ function sameLocation(a: Anchor, b: Anchor): boolean {
       ? [x.kind, x.changeId, x.path, x.side, x.lines]
       : x.kind === "message"
         ? [x.kind, x.changeId, x.lines]
-        : x;
+        : x.kind === "final"
+          ? [x.kind, x.groupId, x.lines]
+          : x.kind === "pr_body"
+            ? [x.kind, x.lines]
+            : x;
   return JSON.stringify(key(a)) === JSON.stringify(key(b));
 }

@@ -146,7 +146,7 @@ export async function reviewCreate(
 }
 
 /** e.g. `2 current, 1 moved (#3), 1 outdated (#5)`. */
-function describeReanchored(threads: ReanchoredThread[]): string {
+export function describeReanchored(threads: ReanchoredThread[]): string {
   const states = ["current", "moved", "outdated"] as const;
   return states
     .map((state) => {

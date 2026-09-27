@@ -1,10 +1,11 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Actor, ChangeSnapshot, CheckRun, Entry, Phase } from "../src/model.ts";
 import { repoDir } from "../src/paths.ts";
-import { Store } from "../src/store.ts";
+import { MIGRATIONS, Store } from "../src/store.ts";
 
 const agent: Actor = { kind: "agent", name: "claude-code" };
 const phases: Phase[] = [{ id: 1, title: "One", bookmark: "f/1-one", doneWhen: null, tasks: [] }];
@@ -205,14 +206,30 @@ describe("Store", () => {
       anchorState: "moved",
       originalAnchor: feature,
     });
+  });
 
-    // Threads from before migration 3 get their original anchor and round backfilled.
-    store.db.run("ALTER TABLE threads DROP COLUMN anchor_round");
-    store.db.run("ALTER TABLE threads DROP COLUMN original_anchor");
-    store.db.run("PRAGMA user_version = 2");
-    store.close();
-    store = await Store.open(root);
-    expect(store.getThread("f", 1)).toMatchObject({ anchorRound: 1, originalAnchor: moved });
+  test("migrations upgrade a database made by an older version", async () => {
+    // A database at schema version 2, with a thread from before re-anchoring existed.
+    const old = "/work/old-repo";
+    mkdirSync(repoDir(old), { recursive: true });
+    const db = new Database(join(repoDir(old), "state.db"));
+    for (const m of MIGRATIONS.slice(0, 2)) db.run(m);
+    db.run("PRAGMA user_version = 2");
+    db.run(
+      `INSERT INTO features VALUES ('f', 'F', 'trunk()', 'in_review', 1, 'now');
+       INSERT INTO rounds VALUES ('f', 1, 'op', 1, 'base', 'open', NULL, 'agent:a', 'now');
+       INSERT INTO threads VALUES ('f', 1, 'comment', '{"kind":"feature"}', NULL, 'open', 'current',
+         NULL, 'agent:a', 1, 'now');`,
+    );
+    db.close();
+
+    const upgraded = await Store.open(old);
+    expect(upgraded.getThread("f", 1)).toMatchObject({
+      anchorRound: 1,
+      originalAnchor: { kind: "feature" },
+    });
+    expect(upgraded.getRound("f", 1)).toMatchObject({ kind: "code", final: null });
+    upgraded.close();
   });
 
   test("check runs: passing lookup, updates, and round links", () => {

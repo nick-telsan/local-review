@@ -1,5 +1,13 @@
 import { parseArgs } from "node:util";
 import { featureList, featureStart } from "./commands/feature.ts";
+import {
+  finalApply,
+  finalCut,
+  finalMessage,
+  finalPrBody,
+  finalRoundCreate,
+  finalShow,
+} from "./commands/final.ts";
 import { handoff } from "./commands/handoff.ts";
 import { HOOK_EVENTS, hook } from "./commands/hook.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
@@ -19,11 +27,18 @@ Usage:
   lr plan revise -F <file>        a revised plan after review
   lr plan show
   lr review create [--allow-failing] [--skip-checks]
+  lr review create --final        a final round: the squash groups, messages, and PR body
   lr review submit [-F <review.json>] [--verdict approved|changes_requested] [-m <body>]
                    [--round <n>]      record a review on the latest (or given) open round
   lr handoff [--round <n>]        what the author needs to act on after a review
   lr threads [--status <s,…> | --all]
   lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]
+  lr final show                   the final commits (one per phase) and their drafts
+  lr final message <group> -F <file>
+  lr final pr-body -F <file>
+  lr final cut <change> [--remove]
+                                  start a new final commit at a change, splitting its phase
+  lr final apply                  squash the stack as approved in the final round
   lr status
   lr hook ${HOOK_EVENTS.join("|")}
                                   Claude Code hook handlers (hook JSON on stdin)
@@ -68,7 +83,16 @@ const COMMANDS: Record<string, Handler> = {
     const { values } = parse(args, {
       "allow-failing": { type: "boolean" },
       "skip-checks": { type: "boolean" },
+      final: { type: "boolean" },
     });
+    if (values.final) {
+      if (values["allow-failing"] || values["skip-checks"]) {
+        throw new LrError(
+          "--final reuses the approved round's checks; drop --allow-failing/--skip-checks",
+        );
+      }
+      return finalRoundCreate(ctx);
+    }
     return reviewCreate(ctx, {
       allowFailing: values["allow-failing"],
       skipChecks: values["skip-checks"],
@@ -117,6 +141,23 @@ const COMMANDS: Record<string, Handler> = {
       action: actions[0] ?? null,
       body: values.message ?? (words.length ? words.join(" ") : null),
     });
+  },
+  "final show": async (ctx, args) => {
+    parse(args, {});
+    return finalShow(ctx);
+  },
+  "final message": async (ctx, args) => {
+    const { values, positionals } = parse(args, FILE);
+    return finalMessage(ctx, positionals[0], values.file);
+  },
+  "final pr-body": async (ctx, args) => finalPrBody(ctx, parse(args, FILE).values.file),
+  "final cut": async (ctx, args) => {
+    const { values, positionals } = parse(args, { remove: { type: "boolean" } });
+    return finalCut(ctx, positionals[0], values.remove ?? false);
+  },
+  "final apply": async (ctx, args) => {
+    parse(args, {});
+    return finalApply(ctx);
   },
   status: async (ctx, args) => {
     parse(args, {});

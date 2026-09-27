@@ -1,7 +1,9 @@
+import { join } from "node:path";
 import { AnchorResolver, describeAnchor } from "../anchors.ts";
 import { loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
+import { Drafts } from "../final.ts";
 import type { Anchor, Feature, Review, Round, Thread } from "../model.ts";
 import { parseSubmission } from "../submission.ts";
 
@@ -33,6 +35,18 @@ export async function reviewSubmit(
   const submission = parseSubmission(data);
 
   const round = pickRound(ctx, feature, opts.round);
+  // A human approves exactly what the final round froze; later edits need a new final round.
+  if (round.final && submission.verdict === "approved" && ctx.actor.kind === "human") {
+    const changed = new Drafts(join(ctx.featureDir(feature.slug), "final")).changedSince(
+      round.final,
+    );
+    if (changed.length) {
+      throw new LrError(
+        `the drafts changed since final round ${round.n} opened (${changed.join(", ")}); run ` +
+          "`lr review create --final` so the approval covers them",
+      );
+    }
+  }
   const plan = ctx.store.getPlanVersion(feature.slug, round.planVersion)!;
   const resolver = new AnchorResolver(ctx.jj, round, plan.phases);
 

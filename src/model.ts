@@ -12,6 +12,7 @@ export type FeatureStatus =
   | "revising"
   | "finalizing"
   | "final_review"
+  | "approved"
   | "done"
   | "abandoned";
 
@@ -60,14 +61,34 @@ export interface ChangeSnapshot {
 
 export type RoundStatus = "open" | "closed" | "superseded";
 
+/** One commit of the finished feature: a run of changes in one phase, squashed together. */
+export interface FinalGroup {
+  /** The phase id, or phase id + letter when a phase is cut into several (`2a`, `2b`). */
+  id: string;
+  phaseId: number;
+  changeIds: string[];
+  message: string;
+}
+
+/** What a final round froze for review, and what `lr final apply` applies once it's approved. */
+export interface FinalSnapshot {
+  /** The code round a human approved; the stack must still be exactly that. */
+  approvedRound: number;
+  groups: FinalGroup[];
+  prBody: string;
+}
+
 export interface Round {
   n: number;
+  /** A code round reviews the stack; a final round reviews the squash groups and messages. */
+  kind: "code" | "final";
   jjOpId: string;
   planVersion: number;
   baseCommitId: string;
   changes: ChangeSnapshot[];
   status: RoundStatus;
   verdict: Verdict | null;
+  final: FinalSnapshot | null;
   createdBy: Actor;
   createdAt: string;
 }
@@ -127,7 +148,14 @@ export type Anchor =
       side: "old" | "new";
       lines: [number, number];
       snippet: string[];
-    };
+    }
+  | {
+      kind: "final"; // a final commit's message, in a final round
+      groupId: string;
+      lines: [number, number] | null;
+      snippet: string[];
+    }
+  | { kind: "pr_body"; lines: [number, number] | null; snippet: string[] };
 
 export type Severity = "blocking" | "suggestion" | "nit" | "question";
 

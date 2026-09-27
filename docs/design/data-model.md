@@ -39,6 +39,7 @@ plan ──► implement ──► lr review create ──► round N ──► 
       plan/v1.md, v2.md, …            # plan versions (human/agent-authored markdown)
       rounds/<n>/patches/<change>.patch
       checks/<run-id>.log             # check logs (runs are keyed by commit, not round)
+      final/messages/<group>.md       # final commit message drafts
       final/pr.md                     # PR body draft
       workspaces/checks/              # jj workspace `lr-<feature>-checks`, where checks run
 <repo>/.local-review.toml             # team-shareable: checks, bookmark naming, squash defaults
@@ -93,6 +94,7 @@ interface Feature {
     | "revising"
     | "finalizing"
     | "final_review"
+    | "approved" // final round approved; `lr final apply` is next
     | "done"
     | "abandoned";
   currentPlanVersion: number;
@@ -147,6 +149,7 @@ jj 0.45.)
 ```ts
 interface Round {
   n: number;
+  kind: "code" | "final"; // a final round reviews the squash groups and messages (see Finalization)
   jjOpId: string; // operation id at snapshot time
   planVersion: number;
   base: { commitId: string };
@@ -155,6 +158,7 @@ interface Round {
   // reviewed it (or by a rebase mid-review)
   status: "open" | "closed" | "superseded";
   verdict: "changes_requested" | "approved" | null; // set by a human's review
+  final: FinalSnapshot | null; // final rounds only
   rebases: string[]; // RebaseEvent ids since the previous round
   createdBy: Actor;
   createdAt: string;
@@ -350,8 +354,8 @@ type Anchor =
       lines: [number, number] | null; // null = the whole message
       snippet: string[]; // the commented lines (or the whole message)
     }
-  | { kind: "final"; groupId: string; lines?: [number, number] } // squashed-commit message
-  | { kind: "pr_body"; lines?: [number, number] }
+  | { kind: "final"; groupId: string; lines: [number, number] | null; snippet: string[] } // final round
+  | { kind: "pr_body"; lines: [number, number] | null; snippet: string[] } // final round
   | {
       kind: "code";
       view: { from: RevRef; to: RevRef }; // the diff the comment was made in
@@ -370,7 +374,7 @@ new-side lines in a multi-change view, attribution comes from `jj file annotate`
 latest change in the view that touched any of the commented lines. For old-side lines, and for
 lines no change in the view touched, it falls back to `view.to`'s change.
 
-(`final` and `pr_body` anchors arrive with finalization.)
+`final` and `pr_body` anchors point into a final round's frozen messages and PR body.
 
 **Re-anchoring**
 
@@ -431,7 +435,10 @@ path agents use. `--verdict` and `-m <body>` can stand in for the file, or overr
     { "phase": 1, "path": "src/db.ts", "lines": 40, "body": "…" },
     { "path": "src/db.ts", "lines": 12, "side": "old", "body": "Why was this removed?" },
     // A commit message (the whole message, or specific lines).
-    { "change": "kxqp", "message": true, "lines": 1, "severity": "nit", "body": "Imperative." }
+    { "change": "kxqp", "message": true, "lines": 1, "severity": "nit", "body": "Imperative." },
+    // Final rounds only: a final commit's message (by group id), or the PR body.
+    { "final": "2a", "lines": 1, "body": "Say what rotates." },
+    { "pr_body": true, "lines": [3, 4], "body": "Mention the backfill." }
   ]
 }
 ```
@@ -455,31 +462,63 @@ the current one. Each comment becomes a thread (numbered per feature) whose firs
 comment. Agent comments start `proposed` when `[review] triage_agent_comments = true` is set in
 `.local-review.toml`, and `open` otherwise.
 
-### Squash plan
+### Finalization
+
+After a human approves a code round with nothing left open, the feature is `finalizing`:
+
+```
+finalizing ──lr review create --final──► final_review ──human approves──► approved ──lr final apply──► done
+    ▲                                         │
+    └──────────── changes requested ──────────┘
+```
+
+**Squash groups.** The approved round's changes are grouped into the commits of the finished
+feature. There's one group per phase by default, named by phase id (`1`, `2`). `lr final cut <change>`
+starts a new group at a change, splitting its phase (`2a`, `2b`). Only the developer should do that.
+Moving changes between phases and reordering are out of scope. Every change must be in a phase.
+
+**Drafts.** Each group's message and the PR body are plain files in the feature directory
+(`final/messages/<group>.md`, `final/pr.md`). They're written with `lr final message <group> -F` and
+`lr final pr-body -F`, or edited directly by the developer. `lr final show` lists the groups with
+their changes and drafts. Its `--json` includes the commit guidelines and PR template from
+`[final]` in `.local-review.toml` (`commit_guidelines`, and `pr_template`, which defaults to
+`.github/pull_request_template.md`). A cut clears the drafted messages of its phase, since their
+group ids change.
+
+**Final rounds.** `lr review create --final` opens a round of kind `final`. It carries the stack and
+freezes the drafts:
 
 ```ts
-interface SquashPlan {
-  round: number;
-  groups: FinalCommit[]; // ordered; each group's changes must be contiguous
-}
-
-interface FinalCommit {
-  id: string;
-  phaseId: number;
-  changeIds: string[];
-  message: {
-    draft: string | null; // composed by the agent from member messages + guidelines
-    editedBy?: Actor;
-    approved: boolean;
-  };
+interface FinalSnapshot {
+  approvedRound: number; // the code round a human approved
+  groups: { id: string; phaseId: number; changeIds: string[]; message: string }[];
+  prBody: string;
 }
 ```
 
-By default there is one group per phase. In the UI, the developer toggles a "cut" between adjacent
-changes in a phase to split it. Moving changes between phases and reordering are out of scope for
-v1. The diff of a group is just the diff over its range, so the final review can preview the result
-without squashing anything. `lr final apply` records the jj op id first (as the undo point), then
-runs `jj squash` per group.
+It's refused unless:
+- the stack's commits are exactly the approved round's;
+- every group has a message and there's a PR body;
+- no thread is `open` or `proposed`.
+
+It reuses the approved round's checks. Reviewers comment on the messages and the PR body with
+`final` and `pr_body` locations (see Review submissions). Code comments still work. Anything that
+needs a code change goes back through a code round (`lr review create`). Threads on messages and the
+PR body stay put during code rounds, and get re-anchored at the next final round.
+
+**What's applied is what a human approved.** A human can't approve a final round if the drafts have
+changed since it opened. `lr final apply` refuses if they've changed since the approval, if a thread
+is open, or if the stack changed.
+
+**`lr final apply`:**
+1. Records the jj operation as the undo point.
+2. Squashes each group into its last change with its message. The last change keeps its change id
+   and the phase's bookmark.
+3. Checks that the new top of the stack has exactly the approved tree.
+4. On any failure, it runs `jj op restore` back to the undo point and reports the error. On success,
+   it records the apply (`final_applies`) and marks the feature `done`.
+
+Bookmarks are kept. Pushing and opening the PR are left to the developer, or to an agent they ask.
 
 ## 4. Handoff format
 
@@ -567,10 +606,11 @@ Adds refresh_tokens table
 ````
 
 When the verdict is `approved` and threads are open, the steps are the same, except that the last
-one is a final `lr review create` "for a last look". Approved with nothing open means stop:
-finalization isn't built yet. Once it is, the approved path will draft one message per squash group
-(`lr final message <group> -F`), draft the PR body (`lr final pr-body -F`), and run
-`lr review create --final`.
+one is a final `lr review create` "for a last look". Approved with nothing open means finalize: draft
+one message per group (`lr final message <group> -F`) and the PR body (`lr final pr-body -F`),
+then run `lr review create --final`. A final round's handoff is titled "final round N". It groups
+threads under "Final commit messages" and "PR body". Its steps are to redraft, reply, and open the
+next final round, or to run `lr final apply` once approved.
 
 ## 5. Agent-facing CLI surface (sketch)
 
@@ -581,12 +621,15 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr feature start <slug> [--base <revset>]`                              | author agent   | create feature                                                                |
 | `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
 | `lr note <change> <path>:<a>-<b> "<text>"`                               | author agent   | author note (was `TEMPORAL`)                                                  |
-| `lr review create [--final] [--allow-failing]`                           | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |
+| `lr review create [--allow-failing] [--skip-checks]`                     | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |
+| `lr review create --final`                                               | author agent   | a final round (see Finalization)                                              |
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
 | `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
 | `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see Thread)                                    |
 | `lr threads [--status <s,…>\|--all]`                                     | anyone         | list threads                                                                  |
-| `lr final message <group> -F` · `lr final pr-body -F` · `lr final apply` | author agent   | finalization                                                                  |
+| `lr final show` · `lr final message <group> -F` · `lr final pr-body -F`  | author agent   | draft the final commits (see Finalization)                                    |
+| `lr final cut <change> [--remove]`                                       | developer      | split a phase into more than one final commit                                 |
+| `lr final apply`                                                         | anyone         | squash the stack as approved                                                  |
 | `lr status [--json]`                                                     | anyone         | feature state + what's expected next                                          |
 | `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack (or adopt one already done); see Rebase                      |
 | `lr hook session-start\|pre-tool-use\|stop`                              | Claude Code    | hook handlers; see Claude Code integration                                    |
@@ -625,6 +668,13 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
   ids; the review view uses interdiffs.
 - **Repo moves:** `lr repo relink`.
 - **Notes during implementation:** re-anchored at every `lr review create`.
+- **Final rounds, not a separate artifact:** the final review is a round of kind `final`, so reviews,
+  threads, re-anchoring, and the handoff all work unchanged.
+- **Drafts are files; approvals are snapshots.** The developer can edit drafts in their editor, and
+  lr guarantees that what's applied is exactly what a human approved. It refuses an approval or an
+  apply if the drafts drifted.
+- **Squash into the last change:** it keeps the phase bookmark and change id, and jj verifies the
+  tree is unchanged.
 - **Agent by default inside agents:** lr defaults to the detected coding agent's identity rather
   than the OS user. Your own `!` commands inside Claude Code therefore need `--as <you>`.
 - **The Stop reminder only fires for changes made in the session:** a session that didn't touch the

@@ -27,23 +27,29 @@ describe("plugin", () => {
       const code = [...text.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]!);
       code.push(...fences(text).map((f) => f.body));
       for (const snippet of code) {
-        for (const m of snippet.matchAll(/(?:^|[\s(])lr ([a-z]+)(?: ([a-z]+))?/g)) {
+        for (const m of snippet.matchAll(/(?:^|[\s(])lr ([a-z-]+)(?: ([a-z-]+))?/g)) {
+          const command = `lr ${m[1]}${m[2] ? ` ${m[2]}` : ""}`;
           const known = COMMAND_NAMES.includes(`${m[1]} ${m[2]}`) || COMMAND_NAMES.includes(m[1]!);
-          expect({ doc, command: `lr ${m[1]}`, known }).toEqual({
-            doc,
-            command: `lr ${m[1]}`,
-            known: true,
-          });
+          expect({ doc, command, known }).toEqual({ doc, command, known: true });
         }
       }
     }
   });
 
-  test("the example review is a valid review", async () => {
-    const [json] = fences(await read("skills/lr-review/SKILL.md")).filter((f) => f.lang === "json");
-    const review = parseSubmission(JSON.parse(json!.body));
-    expect(review.verdict).toBe("changes_requested");
-    expect(review.comments).toHaveLength(5);
+  test("the example reviews are valid reviews", async () => {
+    const examples = fences(await read("skills/lr-review/SKILL.md")).filter(
+      (f) => f.lang === "json",
+    );
+    const reviews = examples.map((f) => parseSubmission(JSON.parse(f.body)));
+    expect(reviews.map((r) => [r.verdict, r.comments.length])).toEqual([
+      ["changes_requested", 5],
+      ["changes_requested", 3],
+    ]);
+    expect(reviews[1]!.comments.map((c) => [c.final, c.prBody])).toEqual([
+      ["2a", false],
+      [null, true],
+      [null, true],
+    ]);
   });
 
   test("the example plan is a valid plan, with the documented default bookmark", async () => {

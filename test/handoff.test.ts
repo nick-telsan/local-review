@@ -42,6 +42,8 @@ const change = (id: string, phaseId: number | null, description = `Subject ${id}
 const changes = [change("aaaa", 1), change("bbbb", 1, ""), change("cccc", 2), change("dddd", null)];
 const round = (verdict: Round["verdict"] = null): Round => ({
   n: 2,
+  kind: "code",
+  final: null,
   jjOpId: "op",
   planVersion: 1,
   baseCommitId: "base",

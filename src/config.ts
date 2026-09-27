@@ -15,21 +15,34 @@ export interface ReviewConfig {
   triageAgentComments: boolean;
 }
 
+/** Repo-relative paths to what the author follows when drafting final messages and the PR body. */
+export interface FinalConfig {
+  commitGuidelines: string | null;
+  /** Defaults to `.github/pull_request_template.md` when that file exists. */
+  prTemplate: string | null;
+}
+
 export interface RepoConfig {
   /** Runs in the check workspace before checks at each commit (e.g. `bun install`). */
   setup: string | null;
   checks: CheckConfig[];
   review: ReviewConfig;
+  final: FinalConfig;
 }
 
 const DEFAULT_REVIEW: ReviewConfig = { triageAgentComments: false };
+const GITHUB_PR_TEMPLATE = ".github/pull_request_template.md";
 
 export const CONFIG_FILE = ".local-review.toml";
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 
 export async function loadRepoConfig(root: string): Promise<RepoConfig> {
   const file = Bun.file(join(root, CONFIG_FILE));
-  if (!(await file.exists())) return { setup: null, checks: [], review: DEFAULT_REVIEW };
+  const defaultTemplate = (await Bun.file(join(root, GITHUB_PR_TEMPLATE)).exists())
+    ? GITHUB_PR_TEMPLATE
+    : null;
+  const final: FinalConfig = { commitGuidelines: null, prTemplate: defaultTemplate };
+  if (!(await file.exists())) return { setup: null, checks: [], review: DEFAULT_REVIEW, final };
 
   let data: Record<string, unknown>;
   try {
@@ -91,10 +104,30 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
     }
   }
 
+  const rawFinal = data.final ?? {};
+  if (typeof rawFinal !== "object" || rawFinal === null || Array.isArray(rawFinal)) {
+    problems.push("final: must be a table ([final])");
+  } else {
+    for (const [key, field] of [
+      ["commit_guidelines", "commitGuidelines"],
+      ["pr_template", "prTemplate"],
+    ] as const) {
+      const value = (rawFinal as Record<string, unknown>)[key];
+      if (value === undefined) continue;
+      if (typeof value !== "string" || !value) {
+        problems.push(`final.${key}: must be a path relative to the repo root`);
+      } else if (!(await Bun.file(join(root, value)).exists())) {
+        problems.push(`final.${key}: ${value} doesn't exist`);
+      } else {
+        final[field] = value;
+      }
+    }
+  }
+
   if (problems.length > 0) {
     throw new LrError(`${CONFIG_FILE}:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
   }
-  return { setup: setup as string | null, checks, review };
+  return { setup: setup as string | null, checks, review, final };
 }
 
 export function parseDuration(text: string): number | null {

@@ -25,6 +25,8 @@ const comment = (fields: Partial<CommentInput>): CommentInput => ({
   lines: null,
   side: "new",
   message: false,
+  final: null,
+  prBody: false,
   severity: null,
   body: "x",
   suggestion: null,
@@ -54,6 +56,8 @@ beforeAll(async () => {
   const snap = await takeSnapshot(jj, "main", phases.slice(0, 2));
   round = {
     n: 1,
+    kind: "code",
+    final: null,
     jjOpId: snap.jjOpId,
     planVersion: 1,
     baseCommitId: snap.baseCommitId,

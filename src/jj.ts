@@ -151,6 +151,25 @@ export class Jj {
     return this.run(["diff", "--git", "-r", rev]);
   }
 
+  /** The `--git` diff between two revisions; empty when their trees are the same. */
+  async diffBetween(from: string, to: string): Promise<string> {
+    return this.run(["diff", "--git", "--from", from, "--to", to]);
+  }
+
+  /** Squash `from` (change ids) into `into`, giving the result `message`. */
+  async squash(from: string[], into: string, message: string): Promise<void> {
+    await this.run(["squash", "--from", from.join("|"), "--into", into, "-m", message]);
+  }
+
+  async describe(rev: string, message: string): Promise<void> {
+    await this.run(["describe", rev, "-m", message]);
+  }
+
+  /** Put the repo back as it was at operation `op`. */
+  async restoreOp(op: string): Promise<void> {
+    await this.run(["op", "restore", op]);
+  }
+
   /** Whether `path` (root-relative) is a file at `rev`. Directories don't count. */
   async isFile(rev: string, path: string): Promise<boolean> {
     const out = await this.run(["file", "list", "-r", rev, rootFile(path)]);

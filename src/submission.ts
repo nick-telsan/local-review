@@ -9,6 +9,10 @@ export interface CommentInput {
   lines: [number, number] | null;
   side: "old" | "new";
   message: boolean;
+  /** A final commit's group id (final rounds only). */
+  final: string | null;
+  /** The PR body (final rounds only). */
+  prBody: boolean;
   severity: Severity | null;
   body: string;
   suggestion: string | null;
@@ -29,6 +33,8 @@ const COMMENT_FIELDS = new Set([
   "lines",
   "side",
   "message",
+  "final",
+  "pr_body",
   "severity",
   "body",
   "suggestion",
@@ -124,6 +130,16 @@ function parseComment(c: unknown, where: string, problems: string[]): CommentInp
   const message = c.message ?? false;
   if (typeof message !== "boolean") problems.push(`${where}.message: must be true or false`);
 
+  // Group ids look like `2` or `2a`; accept a bare number for the former.
+  const rawFinal = c.final ?? null;
+  const final = typeof rawFinal === "number" ? String(rawFinal) : rawFinal;
+  if (final !== null && (typeof final !== "string" || !final)) {
+    problems.push(`${where}.final: must be a final commit's group id, e.g. "2" or "2a"`);
+  }
+  const prBody = c.pr_body ?? false;
+  if (typeof prBody !== "boolean") problems.push(`${where}.pr_body: must be true or false`);
+  const onFinal = final !== null || prBody === true;
+
   const severity = c.severity ?? null;
   if (severity !== null && !SEVERITIES.includes(severity as Severity)) {
     problems.push(`${where}.severity: must be one of ${SEVERITIES.join(", ")}`);
@@ -140,8 +156,18 @@ function parseComment(c: unknown, where: string, problems: string[]): CommentInp
     problems.push(`${where}: a comment is on a file (path) or a commit message, not both`);
   }
   if (path !== null && rawLines === null) problems.push(`${where}: a file comment needs lines`);
-  if (rawLines !== null && path === null && message !== true) {
-    problems.push(`${where}: lines only apply to a file (path) or a commit message`);
+  if (onFinal && (change !== null || phase !== null || path !== null || message === true)) {
+    problems.push(
+      `${where}: final and pr_body comments stand alone (no change, phase, path, or message)`,
+    );
+  }
+  if (final !== null && prBody === true) {
+    problems.push(`${where}: a comment is on a final commit or the PR body, not both`);
+  }
+  if (rawLines !== null && path === null && message !== true && !onFinal) {
+    problems.push(
+      `${where}: lines only apply to a file (path), a message, a final commit, or the PR body`,
+    );
   }
   if (suggestion !== null && rawLines === null) {
     problems.push(`${where}: a suggestion replaces specific lines, so it needs lines`);
@@ -155,6 +181,8 @@ function parseComment(c: unknown, where: string, problems: string[]): CommentInp
     lines,
     side: side as "old" | "new",
     message: message as boolean,
+    final: final as string | null,
+    prBody: prBody as boolean,
     severity: severity as Severity | null,
     body: body as string,
     suggestion: suggestion as string | null,

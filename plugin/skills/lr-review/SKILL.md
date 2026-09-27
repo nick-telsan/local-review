@@ -1,6 +1,6 @@
 ---
 name: lr-review
-description: Review a local-review (lr) round as an agent reviewer. Checks the jj stack against its plan and each phase's done_when, comments on code and commit messages, settles threads the author marked addressed, and submits the whole review with `lr review submit`. Use when asked to review an lr feature or round, or to re-check addressed threads.
+description: Review a local-review (lr) round as an agent reviewer. Checks the jj stack against its plan and each phase's done_when, comments on code and commit messages, settles threads the author marked addressed, and submits the whole review with `lr review submit`. Also reviews final rounds (the squashed commits' messages and the PR body). Use when asked to review an lr feature or round, or to re-check addressed threads.
 argument-hint: "[feature]"
 ---
 
@@ -113,3 +113,34 @@ Where a comment lands:
 you'd ship it; non-blocking comments can still be open. Leave the verdict out for comments only.
 
 Finish by telling whoever asked: the verdict, the blocking issues, and how many comments you left.
+
+## Final rounds
+
+A final round (`"kind": "final"` in `lr status --json`) reviews the *finished* commits. The code
+was already approved. The round's `final` field lists each group (the changes squashed into one
+commit, with its message) and the PR body. Check that:
+
+- each message describes its whole commit accurately, follows the repo's commit guidelines
+  (`lr final show --json` includes them), and has an imperative subject;
+- the PR body explains what and why, and says how it was tested, following the repo's PR template
+  if there is one;
+- the grouping makes sense. If a phase should be split, say so in a comment. Cuts are the
+  developer's call.
+
+Comment on a message with `final` (the group id) or on the PR body with `pr_body`, optionally with
+`lines`:
+
+```json
+{
+  "verdict": "changes_requested",
+  "comments": [
+    { "final": "2a", "lines": 1, "severity": "nit", "body": "Say what rotates.",
+      "suggestion": "Rotate refresh tokens on every use" },
+    { "pr_body": true, "lines": [3, 4], "body": "Mention the migration needs a backfill." },
+    { "pr_body": true, "body": "Add how you tested this." }
+  ]
+}
+```
+
+Code comments still work in a final round, but anything that needs a code change sends the feature
+back to a code round.

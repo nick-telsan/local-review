@@ -13,6 +13,7 @@ import type {
   Entry,
   Feature,
   FeatureStatus,
+  FinalSnapshot,
   Phase,
   PlanVersion,
   Review,
@@ -26,7 +27,7 @@ import type {
 import { repoDir } from "./paths.ts";
 
 // Append-only list; the index + 1 is the schema version stored in `user_version`.
-const MIGRATIONS = [
+export const MIGRATIONS = [
   `
   CREATE TABLE features (
     slug TEXT PRIMARY KEY,
@@ -151,6 +152,26 @@ const MIGRATIONS = [
   ALTER TABLE threads ADD COLUMN anchor_round INTEGER;
   ALTER TABLE threads ADD COLUMN original_anchor TEXT;
   UPDATE threads SET anchor_round = created_in_round, original_anchor = anchor;
+  `,
+  `
+  -- Final rounds review the squash groups, their messages, and the PR body (frozen in final).
+  ALTER TABLE rounds ADD COLUMN kind TEXT NOT NULL DEFAULT 'code';
+  ALTER TABLE rounds ADD COLUMN final TEXT;
+  -- A cut starts a new final commit at that change, splitting its phase.
+  CREATE TABLE squash_cuts (
+    feature TEXT NOT NULL REFERENCES features(slug) ON DELETE CASCADE,
+    change_id TEXT NOT NULL,
+    PRIMARY KEY (feature, change_id)
+  );
+  CREATE TABLE final_applies (
+    feature TEXT NOT NULL REFERENCES features(slug) ON DELETE CASCADE,
+    round INTEGER NOT NULL,
+    op_before TEXT NOT NULL,
+    op_after TEXT NOT NULL,
+    applied_by TEXT NOT NULL,
+    applied_at TEXT NOT NULL,
+    PRIMARY KEY (feature, round)
+  );
   `,
 ];
 
@@ -291,16 +312,20 @@ export class Store {
     return row ? this.roundFromRow(row) : null;
   }
 
-  latestRound(slug: string): Round | null {
+  /** The latest round, or the latest of one kind. */
+  latestRound(slug: string, kind?: Round["kind"]): Round | null {
     const row = this.db
-      .query("SELECT * FROM rounds WHERE feature = ? ORDER BY n DESC LIMIT 1")
-      .get(slug) as RoundRow | null;
+      .query(
+        "SELECT * FROM rounds WHERE feature = ? AND kind = COALESCE(?, kind) ORDER BY n DESC LIMIT 1",
+      )
+      .get(slug, kind ?? null) as RoundRow | null;
     return row ? this.roundFromRow(row) : null;
   }
 
   /**
    * Open a new round. A round still open is replaced: `closed` if it was reviewed, `superseded`
-   * if nobody got to it. Returns the new round and what happened to the one it replaced.
+   * if nobody got to it. Returns the new round and what happened to the one it replaced. A final
+   * round carries the snapshot of the squash groups and PR body it reviews.
    */
   createRound(
     slug: string,
@@ -311,6 +336,7 @@ export class Store {
       changes: ChangeSnapshot[];
       checkRunIds: string[];
       createdBy: Actor;
+      final?: FinalSnapshot;
     },
   ): { round: Round; replaced: { n: number; status: RoundStatus } | null } {
     return this.db.transaction(() => {
@@ -336,23 +362,28 @@ export class Store {
         .get(slug) as { next: number };
       const round: Round = {
         n: next,
+        kind: r.final ? "final" : "code",
         jjOpId: r.jjOpId,
         planVersion: r.planVersion,
         baseCommitId: r.baseCommitId,
         changes: r.changes,
         status: "open",
         verdict: null,
+        final: r.final ?? null,
         createdBy: r.createdBy,
         createdAt: now(),
       };
       this.db
         .query(
-          `INSERT INTO rounds (feature, n, jj_op_id, plan_version, base_commit_id, status, verdict, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, 'open', NULL, ?, ?)`,
+          `INSERT INTO rounds (feature, n, kind, final, jj_op_id, plan_version, base_commit_id, status,
+             verdict, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?)`,
         )
         .run(
           slug,
           round.n,
+          round.kind,
+          round.final && JSON.stringify(round.final),
           round.jjOpId,
           round.planVersion,
           round.baseCommitId,
@@ -389,7 +420,7 @@ export class Store {
       );
       for (const id of r.checkRunIds) link.run(slug, round.n, id);
 
-      this.setFeatureStatus(slug, "in_review");
+      this.setFeatureStatus(slug, round.final ? "final_review" : "in_review");
       return { round, replaced };
     })();
   }
@@ -402,12 +433,14 @@ export class Store {
     ).map(changeFromRow);
     return {
       n: row.n,
+      kind: row.kind as Round["kind"],
       jjOpId: row.jj_op_id,
       planVersion: row.plan_version,
       baseCommitId: row.base_commit_id,
       changes,
       status: row.status as RoundStatus,
       verdict: row.verdict as Round["verdict"],
+      final: row.final ? (JSON.parse(row.final) as FinalSnapshot) : null,
       createdBy: parseActor(row.created_by),
       createdAt: row.created_at,
     };
@@ -577,12 +610,26 @@ export class Store {
         return thread;
       });
 
-      // Only a human's verdict decides the round, and it hands the feature back to the author.
+      // Only a human's verdict decides the round, and it hands the feature back to the author:
+      // to revise or finalize after a code round, and to redraft or apply after a final round.
       if (r.reviewer.kind === "human" && r.verdict) {
         this.db
           .query("UPDATE rounds SET verdict = ? WHERE feature = ? AND n = ?")
           .run(r.verdict, slug, r.round);
-        this.setFeatureStatus(slug, r.verdict === "approved" ? "finalizing" : "revising");
+        const { kind } = this.db
+          .query("SELECT kind FROM rounds WHERE feature = ? AND n = ?")
+          .get(slug, r.round) as { kind: string };
+        const approved = r.verdict === "approved";
+        this.setFeatureStatus(
+          slug,
+          kind === "final"
+            ? approved
+              ? "approved"
+              : "finalizing"
+            : approved
+              ? "finalizing"
+              : "revising",
+        );
       }
       return { review, threads };
     })();
@@ -614,6 +661,39 @@ export class Store {
       .query("SELECT * FROM reviews WHERE feature = ? AND round = ? ORDER BY created_at")
       .all(slug, round) as ReviewRow[];
     return rows.map(reviewFromRow);
+  }
+
+  // ── finalization ──────────────────────────────────────────────────────────
+
+  /** Change ids that start a new final commit within their phase. */
+  listCuts(slug: string): string[] {
+    const rows = this.db
+      .query("SELECT change_id FROM squash_cuts WHERE feature = ? ORDER BY change_id")
+      .all(slug) as { change_id: string }[];
+    return rows.map((r) => r.change_id);
+  }
+
+  setCut(slug: string, changeId: string, cut: boolean): void {
+    this.db
+      .query(
+        cut
+          ? "INSERT OR IGNORE INTO squash_cuts (feature, change_id) VALUES (?, ?)"
+          : "DELETE FROM squash_cuts WHERE feature = ? AND change_id = ?",
+      )
+      .run(slug, changeId);
+  }
+
+  /** Record a successful `lr final apply` (with its undo point), and mark the feature done. */
+  recordApply(slug: string, a: { round: number; opBefore: string; opAfter: string; by: Actor }) {
+    this.db.transaction(() => {
+      this.db
+        .query(
+          `INSERT INTO final_applies (feature, round, op_before, op_after, applied_by, applied_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(slug, a.round, a.opBefore, a.opAfter, formatActor(a.by), now());
+      this.setFeatureStatus(slug, "done");
+    })();
   }
 
   /** Threads in id order, with their entries. */
@@ -713,6 +793,8 @@ function planFromRow(r: PlanRow): PlanVersion {
 interface RoundRow {
   feature: string;
   n: number;
+  kind: string;
+  final: string | null;
   jj_op_id: string;
   plan_version: number;
   base_commit_id: string;
