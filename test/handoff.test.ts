@@ -80,9 +80,11 @@ const thread = (anchor: Anchor, extra: Partial<Thread> = {}): Thread => ({
   id: nextId++,
   kind: "comment",
   anchor,
+  anchorRound: 2,
+  anchorState: "current",
+  originalAnchor: anchor,
   severity: null,
   status: "open",
-  anchorState: "current",
   reviewId: "codex-review",
   createdBy: codex,
   createdInRound: 2,
@@ -215,7 +217,7 @@ describe("buildHandoff: threads", () => {
       [3, 'Change `ccccxxxx` "Subject cccc"', [t.rotate.id]],
       [2, "Not in a phase yet", []],
       [3, 'Change `ddddxxxx` "Subject dddd"', [t.unassigned.id]],
-      [2, "Changes no longer in the stack", [t.gone.id]],
+      [2, "No longer in the stack or plan", [t.gone.id]],
     ]);
     expect(h.threads.map((x) => x.id)).toEqual(
       h.sections.flatMap((s) => s.threads.map((x) => x.id)),

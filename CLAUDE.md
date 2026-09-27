@@ -30,7 +30,8 @@ need so far.
 ## Code conventions
 
 - **jj access goes through `src/jj.ts`.** Always read with explicit `-T` templates (JSON via
-  `json(...)`). Never parse jj's default output, because user config can change it. Pin multi-read
+  `json(...)`), or `--git` for diffs. Never parse jj's default output, because user config can
+  change it. Pin multi-read
   operations to one jj operation with `jj.at(opId)`.
 - **Errors meant for the user throw `LrError`.** The CLI prints its message without a stack trace.
   Anything else is a bug and should crash loudly.

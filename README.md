@@ -9,7 +9,8 @@ get squashed. The agent revises, and the loop repeats until the change is approv
 squashed into its final shape and handed off as a PR.
 
 > **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
-> handoff, and threaded replies. Finalization (squashing, the PR body) and the UI are next. See [the design](docs/design/data-model.md).
+> handoff, threaded replies, and comments that follow the code from round to round. Finalization
+> (squashing, the PR body) and the UI are next. See [the design](docs/design/data-model.md).
 
 ## Requirements
 

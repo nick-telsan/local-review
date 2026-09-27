@@ -278,10 +278,12 @@ A thread is used for review comments and also for **author notes** (the replacem
 interface Thread {
   id: number; // per-feature sequence; rendered as #12
   kind: "comment" | "note";
-  anchor: Anchor;
+  anchor: Anchor; // where it points now; when outdated, the last place it was found
+  anchorRound: number | null; // the round whose snapshot `anchor` refers to
+  anchorState: "current" | "moved" | "outdated"; // relative to originalAnchor; see Re-anchoring
+  originalAnchor: Anchor; // where the comment was made; never changes
   severity?: "blocking" | "suggestion" | "nit" | "question";
   status: "proposed" | "open" | "addressed" | "resolved" | "dismissed";
-  anchorState: "current" | "moved" | "outdated"; // recomputed each round
   reviewId?: string; // the review it was created in (comments only)
   createdBy: Actor;
   createdInRound: number | null; // null for notes left during implementation
@@ -364,17 +366,39 @@ lines no change in the view touched, it falls back to `view.to`'s change.
 
 (`final` and `pr_body` anchors arrive with finalization.)
 
-**Re-anchoring (per new round, per thread)**
+**Re-anchoring**
 
-1. Find `changeId` in the new snapshot. If it's gone, follow `jj evolog` / predecessors to see
-   whether it was squashed into another change. If nothing is found → `outdated`.
-2. Same `commitId` → `current` (fast path; after a rebase this never matches).
-3. Otherwise, diff `path` between the old and new commit and map `lines` through the hunks.
-   Untouched lines → `current` if their line numbers didn't change, `moved` if they did (update
-   `lines`, keep the original in history). Touched lines → `outdated`: rendered against the original
-   snippet, the way GitHub shows "outdated". Using a tree diff here, not an interdiff, is deliberate:
-   if trunk shifted or edited the lines, the anchor really did move or go stale.
-4. Fallback: an exact `snippet` search in the new file.
+`lr review create` carries every unsettled thread (`proposed`, `open`, `addressed`) from its
+`anchorRound` onto the new round. Resolved and dismissed threads stay where they were. If one is
+reopened, the next round carries it from there, however many rounds back that is.
+
+The state is always relative to `originalAnchor`:
+
+- **current:** the same change and lines as when the comment was made.
+- **moved:** the same content, on other lines or in another change.
+- **outdated:** the content changed, or its change or phase is gone. The thread keeps its last good
+  `anchor` and `anchorRound`. The handoff shows it "as it was then". Later rounds keep trying from
+  there, so a revert brings it back.
+
+Per anchor kind:
+
+1. **Changes are followed by change id.** If one is missing from the new snapshot, it's looked up in
+   `jj evolog` of every new change, which includes the history of changes squashed into it. If it
+   isn't found there, it was abandoned, and the thread becomes `outdated`.
+2. **Code.** The view keeps its endpoints, followed as above. A start that's gone, or no longer
+   before the end, becomes the end's parent. The commented lines are mapped through
+   `jj diff --git --context=0` between the old and new revision of the file, or skipped when the
+   commit id is the same. Lines no hunk touches shift by the hunks above them. Any hunk inside the
+   range (an insertion between two of the lines included) makes it outdated. This uses a tree diff,
+   not an interdiff, on purpose: if trunk edited the lines, the anchor really did go stale.
+3. **Snippet fallback.** When the diff touches the lines (or the old commit can't be read, e.g.
+   after `jj util gc`), an exact match of `snippet` that appears exactly once in the new file places
+   the thread. That catches code that moved within its file. Renamed files aren't followed yet.
+4. **Commit messages.** A whole-message comment goes outdated if the message changes at all. A
+   line-range comment stays put if those lines are unchanged, or moves to a unique exact match of
+   its snippet.
+5. **Phases** go outdated when the current plan no longer has them. **General** threads are always
+   current.
 
 Author notes follow the same process. Agents leave notes on changes that are still being edited, so
 their anchors are re-mapped at every `lr review create`.
@@ -466,7 +490,8 @@ the feature to `revising` or `finalizing`.
 Rules:
 
 - Include every `open` thread on the feature, from any round (reopened ones included), with the
-  context needed to act on them. `addressed` (waiting on the reviewer), `resolved`, `dismissed`,
+  context needed to act on them. They're shown where they were re-anchored to in the latest round.
+  Outdated threads are marked, with the snippet as it was. `addressed` (waiting on the reviewer), `resolved`, `dismissed`,
   `proposed` and notes are left out.
 - Group by where the fix goes: general → phase → change → file. The agent works change by change
   (`jj edit` / `jj squash --into`), so that's the useful order.
@@ -550,7 +575,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr feature start <slug> [--base <revset>]`                              | author agent   | create feature                                                                |
 | `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
 | `lr note <change> <path>:<a>-<b> "<text>"`                               | author agent   | author note (was `TEMPORAL`)                                                  |
-| `lr review create [--final] [--allow-failing]`                           | author agent   | snapshot + checks; if a check fails, it exits non-zero and no round is opened |
+| `lr review create [--final] [--allow-failing]`                           | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
 | `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
 | `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see Thread)                                    |
@@ -573,6 +598,9 @@ directories. Review state is kept for history unless `--purge` is passed.
   ids; the review view uses interdiffs.
 - **Repo moves:** `lr repo relink`.
 - **Notes during implementation:** re-anchored at every `lr review create`.
+- **Re-anchoring state is relative to where the comment was made,** not the previous round, so
+  "moved" always means "not where you left it". Outdated threads keep trying from their last good
+  round rather than being dropped.
 
 ## 7. Open questions
 

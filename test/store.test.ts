@@ -184,6 +184,37 @@ describe("Store", () => {
     expect(store.getThread("f", 99)).toBeNull();
   });
 
+  test("re-anchoring moves a thread's anchor and keeps the original", async () => {
+    newRound();
+    const feature = { kind: "feature" as const };
+    const comment = { severity: null, body: "a", suggestion: null, status: "open" as const };
+    store.submitReview("f", {
+      round: 1,
+      reviewer: agent,
+      verdict: null,
+      body: null,
+      comments: [{ ...comment, anchor: feature }],
+    });
+    expect(store.getThread("f", 1)).toMatchObject({ anchorRound: 1, originalAnchor: feature });
+
+    const moved = { kind: "phase" as const, phaseId: 1 };
+    store.placeThreads("f", [{ id: 1, anchor: moved, anchorRound: 2, anchorState: "moved" }]);
+    expect(store.getThread("f", 1)).toMatchObject({
+      anchor: moved,
+      anchorRound: 2,
+      anchorState: "moved",
+      originalAnchor: feature,
+    });
+
+    // Threads from before migration 3 get their original anchor and round backfilled.
+    store.db.run("ALTER TABLE threads DROP COLUMN anchor_round");
+    store.db.run("ALTER TABLE threads DROP COLUMN original_anchor");
+    store.db.run("PRAGMA user_version = 2");
+    store.close();
+    store = await Store.open(root);
+    expect(store.getThread("f", 1)).toMatchObject({ anchorRound: 1, originalAnchor: moved });
+  });
+
   test("check runs: passing lookup, updates, and round links", () => {
     store.insertCheckRun("f", checkRun("fail1", { status: "fail", exitCode: 1 }));
     expect(store.findPassingCheck("f", "test", "bun test", "commit-a")).toBeNull();

@@ -133,6 +133,12 @@ export type Severity = "blocking" | "suggestion" | "nit" | "question";
 
 export type ThreadStatus = "proposed" | "open" | "addressed" | "resolved" | "dismissed";
 
+/**
+ * Where a thread's anchor stands, relative to where the comment was made: the same place, the
+ * same content somewhere else (other lines or another change), or content that has since changed.
+ */
+export type AnchorState = "current" | "moved" | "outdated";
+
 export interface Entry {
   id: string;
   author: Actor;
@@ -148,10 +154,15 @@ export interface Thread {
   /** Per-feature sequence, shown as #12. */
   id: number;
   kind: "comment" | "note";
+  /** Where the thread points now; when outdated, the last place it was found. */
   anchor: Anchor;
+  /** The round whose snapshot `anchor` refers to. */
+  anchorRound: number | null;
+  anchorState: AnchorState;
+  /** Where the comment was made. Never changes. */
+  originalAnchor: Anchor;
   severity: Severity | null;
   status: ThreadStatus;
-  anchorState: "current" | "moved" | "outdated";
   reviewId: string | null;
   createdBy: Actor;
   createdInRound: number | null;

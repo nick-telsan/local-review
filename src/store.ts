@@ -6,6 +6,7 @@ import { LrError } from "./errors.ts";
 import type {
   Actor,
   Anchor,
+  AnchorState,
   ChangeSnapshot,
   CheckRun,
   CheckStatus,
@@ -143,6 +144,13 @@ const MIGRATIONS = [
     FOREIGN KEY (feature, thread_id) REFERENCES threads(feature, id) ON DELETE CASCADE
   );
   CREATE INDEX thread_entries_by_thread ON thread_entries(feature, thread_id, created_at);
+  `,
+  `
+  -- Re-anchoring moves threads.anchor; the original stays put, and anchor_round says which
+  -- round's snapshot the current anchor refers to.
+  ALTER TABLE threads ADD COLUMN anchor_round INTEGER;
+  ALTER TABLE threads ADD COLUMN original_anchor TEXT;
+  UPDATE threads SET anchor_round = created_in_round, original_anchor = anchor;
   `,
 ];
 
@@ -521,18 +529,20 @@ export class Store {
         .query("SELECT COALESCE(MAX(id), 0) + 1 AS next FROM threads WHERE feature = ?")
         .get(slug) as { next: number };
       const insertThread = this.db.query(
-        `INSERT INTO threads (feature, id, kind, anchor, severity, status, anchor_state, review_id,
-           created_by, created_in_round, created_at)
-         VALUES (?, ?, 'comment', ?, ?, ?, 'current', ?, ?, ?, ?)`,
+        `INSERT INTO threads (feature, id, kind, anchor, original_anchor, anchor_round, severity,
+           status, anchor_state, review_id, created_by, created_in_round, created_at)
+         VALUES (?, ?, 'comment', ?, ?, ?, ?, ?, 'current', ?, ?, ?, ?)`,
       );
       const threads: Thread[] = r.comments.map((c) => {
         const thread: Thread = {
           id: next++,
           kind: "comment",
           anchor: c.anchor,
+          anchorRound: r.round,
+          anchorState: "current",
+          originalAnchor: c.anchor,
           severity: c.severity,
           status: c.status,
-          anchorState: "current",
           reviewId: review.id,
           createdBy: r.reviewer,
           createdInRound: r.round,
@@ -549,10 +559,13 @@ export class Store {
             },
           ],
         };
+        const anchor = JSON.stringify(thread.anchor);
         insertThread.run(
           slug,
           thread.id,
-          JSON.stringify(thread.anchor),
+          anchor,
+          anchor,
+          thread.anchorRound,
           thread.severity,
           thread.status,
           review.id,
@@ -628,6 +641,22 @@ export class Store {
           .run(entry.statusChange.to, slug, threadId);
       }
       return this.getThread(slug, threadId)!;
+    })();
+  }
+
+  /** Record where threads stand after re-anchoring onto a new round. */
+  placeThreads(
+    slug: string,
+    placements: { id: number; anchor: Anchor; anchorRound: number; anchorState: AnchorState }[],
+  ): void {
+    const update = this.db.query(
+      `UPDATE threads SET anchor = ?, anchor_round = ?, anchor_state = ?
+       WHERE feature = ? AND id = ?`,
+    );
+    this.db.transaction(() => {
+      for (const p of placements) {
+        update.run(JSON.stringify(p.anchor), p.anchorRound, p.anchorState, slug, p.id);
+      }
     })();
   }
 
@@ -776,6 +805,8 @@ interface ThreadRow {
   id: number;
   kind: string;
   anchor: string;
+  anchor_round: number | null;
+  original_anchor: string;
   severity: string | null;
   status: string;
   anchor_state: string;
@@ -789,9 +820,11 @@ function threadFromRow(r: ThreadRow, entries: Entry[]): Thread {
     id: r.id,
     kind: r.kind as Thread["kind"],
     anchor: JSON.parse(r.anchor) as Anchor,
+    anchorRound: r.anchor_round,
+    anchorState: r.anchor_state as AnchorState,
+    originalAnchor: JSON.parse(r.original_anchor) as Anchor,
     severity: r.severity as Severity | null,
     status: r.status as ThreadStatus,
-    anchorState: r.anchor_state as Thread["anchorState"],
     reviewId: r.review_id,
     createdBy: parseActor(r.created_by),
     createdInRound: r.created_in_round,

@@ -125,7 +125,8 @@ export async function threads(
           const replies = t.entries.length - 1;
           return (
             `#${String(t.id).padEnd(4)} ${t.status.padEnd(10)} ${(t.severity ?? "").padEnd(10)} ` +
-            `${describeAnchor(t.anchor)}  ${truncate(first, 60)}` +
+            `${describeAnchor(t.anchor)}${t.anchorState === "outdated" ? " (outdated)" : ""}  ` +
+            truncate(first, 60) +
             (replies ? `  (+${replies} ${replies === 1 ? "reply" : "replies"})` : "")
           );
         }),

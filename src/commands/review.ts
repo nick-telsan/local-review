@@ -5,6 +5,7 @@ import { loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
 import type { ChangeSnapshot, CheckRun, Phase, Round, RoundStatus } from "../model.ts";
+import { type ReanchoredThread, reanchorThreads } from "../reanchor.ts";
 import { takeSnapshot } from "../snapshot.ts";
 
 export type CheckResultJson = CheckRun & { cached: boolean };
@@ -16,6 +17,8 @@ export interface ReviewCreateOk {
   /** The round this one replaced: `closed` if it had been reviewed, else `superseded`. */
   replaced: { n: number; status: RoundStatus } | null;
   checks: CheckResultJson[];
+  /** Unsettled threads from earlier rounds, carried onto this one. */
+  reanchored: ReanchoredThread[];
   warnings: string[];
 }
 
@@ -105,6 +108,14 @@ export async function reviewCreate(
     createdBy: ctx.actor,
   });
 
+  const reanchored = await reanchorThreads({
+    jj: ctx.jj,
+    store: ctx.store,
+    slug: feature.slug,
+    round,
+    phases: plan.phases,
+  });
+
   const patchDir = join(ctx.featureDir(feature.slug), "rounds", String(round.n), "patches");
   mkdirSync(patchDir, { recursive: true });
   await Promise.all(
@@ -118,6 +129,7 @@ export async function reviewCreate(
     round,
     replaced,
     checks: checksJson,
+    reanchored,
     warnings: snap.warnings,
   };
   ctx.print(json, [
@@ -128,8 +140,24 @@ export async function reviewCreate(
       ? "Checks: none run"
       : `Checks: ${passed.length}/${results.length} passed${cached ? ` (${cached} cached)` : ""}` +
         (failed.length ? ` — ${failed.length} failing (--allow-failing)` : ""),
+    ...(reanchored.length ? [`Threads: ${describeReanchored(reanchored)}`] : []),
   ]);
   return 0;
+}
+
+/** e.g. `2 current, 1 moved (#3), 1 outdated (#5)`. */
+function describeReanchored(threads: ReanchoredThread[]): string {
+  const states = ["current", "moved", "outdated"] as const;
+  return states
+    .map((state) => {
+      const ids = threads.filter((t) => t.anchorState === state).map((t) => `#${t.id}`);
+      if (ids.length === 0) return null;
+      return state === "current"
+        ? `${ids.length} current`
+        : `${ids.length} ${state} (${ids.join(", ")})`;
+    })
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function describeStack(changes: ChangeSnapshot[], phases: Phase[]): string[] {

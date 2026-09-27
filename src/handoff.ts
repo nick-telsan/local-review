@@ -139,10 +139,10 @@ function groupThreads(
     sections.push({ title: "Not in a phase yet", depth: 2, threads: [] }, ...unassigned);
   }
 
-  // Threads on changes that are no longer in the stack (abandoned, squashed away).
+  // Threads on changes that were abandoned, or on phases the plan dropped.
   const rest = threads.filter((t) => !placed.has(t.id));
   if (rest.length) {
-    sections.push({ title: "Changes no longer in the stack", depth: 2, threads: rest });
+    sections.push({ title: "No longer in the stack or plan", depth: 2, threads: rest });
   }
   return sections;
 }
@@ -230,14 +230,18 @@ function renderThread(t: Thread, depth: number): string[] {
       : a.kind === "message"
         ? `commit message${a.lines ? `, line${a.lines[0] === a.lines[1] ? "" : "s"} ${formatLines(a.lines)}` : ""}`
         : null;
-  const title = [`#${t.id}`, t.severity, where].filter(Boolean).join(" · ");
+  const outdated = t.anchorState === "outdated";
+  const title = [`#${t.id}`, t.severity, where, outdated && "outdated"].filter(Boolean).join(" · ");
   const out = [`${"#".repeat(Math.min(depth, 6))} ${title}`, ""];
 
+  if (outdated && (a.kind === "code" || a.kind === "message")) {
+    out.push(`_This changed after round ${t.anchorRound}. As it was then:_`, "");
+  }
   if (a.kind === "code") {
     const width = String(a.lines[1]).length;
     const numbered = a.snippet.map((l, i) => `${String(a.lines[0] + i).padStart(width)} | ${l}`);
     out.push(...fenced(numbered.join("\n"), lang(a.path)), "");
-  } else if (a.kind === "message" && a.lines) {
+  } else if (a.kind === "message" && (a.lines || outdated)) {
     out.push(...fenced(a.snippet.join("\n"), ""), "");
   }
 

@@ -80,28 +80,14 @@ export class AnchorResolver {
   /** The diff a single change introduces. */
   private changeView(change: ChangeSnapshot): CodeAnchor["view"] {
     const i = this.round.changes.indexOf(change);
-    return { from: this.refAt(i - 1), to: { changeId: change.changeId } };
+    return { from: refAt(this.round, i - 1), to: { changeId: change.changeId } };
   }
 
   /** The combined diff of one phase, or of the whole stack when no phase is given. */
   private phaseView(phaseId: number | null): CodeAnchor["view"] {
     const changes = phaseId === null ? this.round.changes : this.phaseChanges(phaseId);
     const first = this.round.changes.indexOf(changes[0]!);
-    return { from: this.refAt(first - 1), to: { changeId: changes.at(-1)!.changeId } };
-  }
-
-  private refAt(index: number): RevRef {
-    return index < 0 ? "base" : { changeId: this.round.changes[index]!.changeId };
-  }
-
-  /** Position of a ref in the stack; the base is -1. */
-  private indexOf(ref: RevRef): number {
-    return ref === "base" ? -1 : this.round.changes.findIndex((c) => c.changeId === ref.changeId);
-  }
-
-  private commitOf(ref: RevRef): string {
-    const i = this.indexOf(ref);
-    return i < 0 ? this.round.baseCommitId : this.round.changes[i]!.commitId;
+    return { from: refAt(this.round, first - 1), to: { changeId: changes.at(-1)!.changeId } };
   }
 
   private async codeAnchor(
@@ -111,7 +97,7 @@ export class AnchorResolver {
     lines: [number, number],
     commentedChange: ChangeSnapshot | null,
   ): Promise<CodeAnchor> {
-    const rev = this.commitOf(side === "new" ? view.to : view.from);
+    const rev = refCommit(this.round, side === "new" ? view.to : view.from);
     if (!(await this.jj.isFile(rev, path))) {
       throw new LrError(`${path} doesn't exist on the ${side} side of ${this.describe(view)}`);
     }
@@ -145,8 +131,8 @@ export class AnchorResolver {
   ): Promise<ChangeSnapshot> {
     const owners = (await this.jj.annotate(rev, path)).slice(lines[0] - 1, lines[1]);
     const changes = this.round.changes;
-    const to = this.indexOf(view.to);
-    for (let i = to; i > this.indexOf(view.from); i--) {
+    const to = refIndex(this.round, view.to);
+    for (let i = to; i > refIndex(this.round, view.from); i--) {
       if (owners.includes(changes[i]!.changeId)) return changes[i]!;
     }
     return changes[to]!;
@@ -154,13 +140,31 @@ export class AnchorResolver {
 
   /** Views always end at a change, never at the base. */
   private changeOf(ref: RevRef): ChangeSnapshot {
-    return this.round.changes[this.indexOf(ref)]!;
+    return this.round.changes[refIndex(this.round, ref)]!;
   }
 
   private describe(view: CodeAnchor["view"]): string {
     const name = (r: RevRef) => (r === "base" ? "base" : r.changeId.slice(0, 8));
     return `${name(view.from)}..${name(view.to)}`;
   }
+}
+
+type Stack = Pick<Round, "baseCommitId" | "changes">;
+
+/** Position of a ref in a round's stack; the base is -1, and a change not in it is -1 too. */
+export function refIndex(round: Stack, ref: RevRef): number {
+  return ref === "base" ? -1 : round.changes.findIndex((c) => c.changeId === ref.changeId);
+}
+
+/** The ref at a position in a round's stack. */
+export function refAt(round: Stack, index: number): RevRef {
+  return index < 0 ? "base" : { changeId: round.changes[index]!.changeId };
+}
+
+/** The commit a ref pointed at in a round. */
+export function refCommit(round: Stack, ref: RevRef): string {
+  const i = refIndex(round, ref);
+  return i < 0 ? round.baseCommitId : round.changes[i]!.commitId;
 }
 
 /** Repo-relative, forward slashes, no `..`. */
@@ -173,7 +177,7 @@ function normalizePath(path: string): string {
 }
 
 /** Split into lines, without a phantom empty line after a trailing newline. */
-function splitLines(text: string): string[] {
+export function splitLines(text: string): string[] {
   if (text === "") return [];
   const lines = text.split("\n");
   if (lines.at(-1) === "") lines.pop();

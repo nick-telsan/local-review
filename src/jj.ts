@@ -37,6 +37,17 @@ interface RawCommit {
   files: number;
 }
 
+/**
+ * One hunk of a line diff. A count of 0 means a pure insertion (old side) or deletion (new side),
+ * positioned after line `start`.
+ */
+export interface Hunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+}
+
 /** Quote a name (e.g. a bookmark) as a jj revset string literal. */
 export function revsetString(name: string): string {
   return JSON.stringify(name);
@@ -148,6 +159,45 @@ export class Jj {
 
   async fileContent(rev: string, path: string): Promise<string> {
     return this.run(["file", "show", "-r", rev, rootFile(path)]);
+  }
+
+  /**
+   * Every commit in `rev`'s evolution, newest first, including the history of changes that were
+   * squashed into it.
+   */
+  async evolog(rev: string): Promise<string[]> {
+    const out = await this.run([
+      "evolog",
+      "--no-graph",
+      "-r",
+      rev,
+      "-T",
+      'commit.commit_id() ++ "\\n"',
+    ]);
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+
+  /**
+   * The line hunks that turn `path` at `from` into `path` at `to`, with no context lines. Parsed
+   * from `--git` output, which user config can't reshape.
+   */
+  async hunks(from: string, to: string, path: string): Promise<Hunk[]> {
+    const out = await this.run([
+      "diff",
+      "--git",
+      "--context=0",
+      "--from",
+      from,
+      "--to",
+      to,
+      rootFile(path),
+    ]);
+    return [...out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)].map((m) => ({
+      oldStart: Number(m[1]),
+      oldCount: Number(m[2] ?? 1),
+      newStart: Number(m[3]),
+      newCount: Number(m[4] ?? 1),
+    }));
   }
 
   /** The change id that last touched each line of `path` at `rev` (index 0 = line 1). */
