@@ -34,6 +34,9 @@ need so far.
   operations to one jj operation with `jj.at(opId)`.
 - **Errors meant for the user throw `LrError`.** The CLI prints its message without a stack trace.
   Anything else is a bug and should crash loudly.
+- **Process I/O is injected.** stdout, stderr and stdin come from the `Io` passed to `main()`
+  (real ones in `src/bin.ts`). Read file-or-stdin arguments with `ctx.readInput()`, never
+  `Bun.stdin` directly.
 - **Every command supports `--json`.** Export the JSON output types from the command module (see
   `ReviewCreateOk`), since agents and the future UI consume them.
 - **Schema changes append to `MIGRATIONS` in `src/store.ts`.** Never edit a shipped migration.

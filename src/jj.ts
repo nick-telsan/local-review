@@ -77,7 +77,8 @@ export class Jj {
     const cmd = ["jj", "--no-pager", "--color=never", "-R", this.root];
     if (this.atOp) cmd.push("--at-op", this.atOp);
     cmd.push(...args);
-    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+    // Run from the root so plain path arguments (e.g. to `file annotate`) are root-relative.
+    const proc = Bun.spawn(cmd, { cwd: this.root, stdout: "pipe", stderr: "pipe" });
     const [out, err, code] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
@@ -138,6 +139,35 @@ export class Jj {
   async diffGit(rev: string): Promise<string> {
     return this.run(["diff", "--git", "-r", rev]);
   }
+
+  /** Whether `path` (root-relative) is a file at `rev`. Directories don't count. */
+  async isFile(rev: string, path: string): Promise<boolean> {
+    const out = await this.run(["file", "list", "-r", rev, rootFile(path)]);
+    return out.trim() === path;
+  }
+
+  async fileContent(rev: string, path: string): Promise<string> {
+    return this.run(["file", "show", "-r", rev, rootFile(path)]);
+  }
+
+  /** The change id that last touched each line of `path` at `rev` (index 0 = line 1). */
+  async annotate(rev: string, path: string): Promise<string[]> {
+    const out = await this.run([
+      "file",
+      "annotate",
+      "-r",
+      rev,
+      "-T",
+      'commit.change_id() ++ "\\n"',
+      path,
+    ]);
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+}
+
+/** A fileset matching exactly one root-relative file. */
+function rootFile(path: string): string {
+  return `root-file:${revsetString(path)}`;
 }
 
 function parseTrailers(text: string): [string, string][] {

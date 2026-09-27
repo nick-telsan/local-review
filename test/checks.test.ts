@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { checkTargets, runChecks } from "../src/checks.ts";
-import type { CheckConfig, RepoConfig } from "../src/config.ts";
+import { type CheckSettings, checkTargets, runChecks } from "../src/checks.ts";
+import type { CheckConfig } from "../src/config.ts";
 import { Jj } from "../src/jj.ts";
 import type { ChangeSnapshot } from "../src/model.ts";
 import { parsePlan } from "../src/plan.ts";
@@ -82,7 +82,7 @@ describe("runChecks", () => {
     repo.cleanup();
   });
 
-  const run = async (config: RepoConfig) => {
+  const run = async (config: CheckSettings) => {
     const jj = new Jj(repo.root);
     const snap = await takeSnapshot(jj, "main", phases);
     const featureDir = join(repo.tmp, "feature");
@@ -100,7 +100,7 @@ describe("runChecks", () => {
   };
 
   test("runs in a separate workspace and reuses passing results", async () => {
-    const config: RepoConfig = {
+    const config: CheckSettings = {
       setup: "touch setup-ran",
       checks: [
         {
@@ -130,7 +130,7 @@ describe("runChecks", () => {
   });
 
   test("a changed command isn't served from cache", async () => {
-    const pass = (run: string): RepoConfig => ({
+    const pass = (run: string): CheckSettings => ({
       setup: null,
       checks: [{ name: "c", run, at: "tip", timeoutMs: 5000 }],
     });
@@ -140,7 +140,7 @@ describe("runChecks", () => {
   });
 
   test("recreates the workspace if its directory was deleted", async () => {
-    const config: RepoConfig = {
+    const config: CheckSettings = {
       setup: null,
       checks: [{ name: "c", run: "exit 1", at: "tip", timeoutMs: 5000 }],
     };

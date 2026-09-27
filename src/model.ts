@@ -67,7 +67,7 @@ export interface Round {
   baseCommitId: string;
   changes: ChangeSnapshot[];
   status: RoundStatus;
-  verdict: "changes_requested" | "approved" | null;
+  verdict: Verdict | null;
   createdBy: Actor;
   createdAt: string;
 }
@@ -86,4 +86,75 @@ export interface CheckRun {
   logPath: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export type Verdict = "changes_requested" | "approved";
+
+export interface Review {
+  id: string;
+  round: number;
+  reviewer: Actor;
+  state: "draft" | "submitted";
+  /** null = comments only. */
+  verdict: Verdict | null;
+  body: string | null;
+  createdAt: string;
+  submittedAt: string | null;
+}
+
+/** A diff endpoint: the stack's base, or a change in the round's snapshot. */
+export type RevRef = { changeId: string } | "base";
+
+export type Anchor =
+  | { kind: "feature" }
+  | { kind: "phase"; phaseId: number }
+  | { kind: "change"; changeId: string }
+  | {
+      kind: "message";
+      changeId: string;
+      commitId: string;
+      lines: [number, number] | null;
+      snippet: string[];
+    }
+  | {
+      kind: "code";
+      /** The diff the comment was made in. */
+      view: { from: RevRef; to: RevRef };
+      /** Where the fix belongs. */
+      changeId: string;
+      commitId: string;
+      path: string;
+      side: "old" | "new";
+      lines: [number, number];
+      snippet: string[];
+    };
+
+export type Severity = "blocking" | "suggestion" | "nit" | "question";
+
+export type ThreadStatus = "proposed" | "open" | "addressed" | "resolved" | "dismissed";
+
+export interface Entry {
+  id: string;
+  author: Actor;
+  body: string;
+  /** Replacement text for the anchor's lines. */
+  suggestion: string | null;
+  statusChange: { from: ThreadStatus; to: ThreadStatus } | null;
+  round: number | null;
+  createdAt: string;
+}
+
+export interface Thread {
+  /** Per-feature sequence, shown as #12. */
+  id: number;
+  kind: "comment" | "note";
+  anchor: Anchor;
+  severity: Severity | null;
+  status: ThreadStatus;
+  anchorState: "current" | "moved" | "outdated";
+  reviewId: string | null;
+  createdBy: Actor;
+  createdInRound: number | null;
+  createdAt: string;
+  entries: Entry[];
 }

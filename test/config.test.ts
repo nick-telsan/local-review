@@ -17,7 +17,11 @@ const load = async (toml: string) => {
 
 describe("loadRepoConfig", () => {
   test("defaults when there's no config file", async () => {
-    expect(await loadRepoConfig(dir)).toEqual({ setup: null, checks: [] });
+    expect(await loadRepoConfig(dir)).toEqual({
+      setup: null,
+      checks: [],
+      review: { triageAgentComments: false },
+    });
   });
 
   test("parses setup and checks with defaults", async () => {
@@ -40,6 +44,7 @@ run = "bun run lint"
         { name: "test", run: "bun test", at: "bookmarks", timeoutMs: 90_000 },
         { name: "lint", run: "bun run lint", at: "tip", timeoutMs: 600_000 },
       ],
+      review: { triageAgentComments: false },
     });
   });
 
@@ -73,6 +78,16 @@ run = "x"
     expect(message).toContain('checks[2].at: must be "tip", "bookmarks", or "changes"');
     expect(message).toContain("checks[3].timeout");
     expect(message).toContain('checks[4].name: duplicate check "c"');
+  });
+
+  test("review settings", async () => {
+    expect((await load("[review]\ntriage_agent_comments = true\n")).review).toEqual({
+      triageAgentComments: true,
+    });
+    await expect(load("[review]\ntriage_agent_comments = 1\n")).rejects.toThrow(
+      /must be true or false/,
+    );
+    await expect(load('review = "x"\n')).rejects.toThrow(/must be a table/);
   });
 
   test("rejects checks that aren't an array of tables", async () => {

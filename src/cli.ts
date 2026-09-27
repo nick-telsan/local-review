@@ -3,7 +3,8 @@ import { featureList, featureStart } from "./commands/feature.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
 import { reviewCreate } from "./commands/review.ts";
 import { status } from "./commands/status.ts";
-import { Context, type Output } from "./context.ts";
+import { reviewSubmit } from "./commands/submit.ts";
+import { Context, type Io } from "./context.ts";
 import { LrError } from "./errors.ts";
 
 const USAGE = `lr — local review for agentic development
@@ -15,6 +16,8 @@ Usage:
   lr plan revise -F <file>        a revised plan after review
   lr plan show
   lr review create [--allow-failing] [--skip-checks]
+  lr review submit [-F <review.json>] [--verdict approved|changes_requested] [-m <body>]
+                   [--round <n>]      record a review on the latest (or given) open round
   lr status
 
 Global options:
@@ -62,6 +65,20 @@ const COMMANDS: Record<string, Handler> = {
       skipChecks: values["skip-checks"],
     });
   },
+  "review submit": async (ctx, args) => {
+    const { values } = parse(args, {
+      ...FILE,
+      verdict: { type: "string" },
+      message: { type: "string", short: "m" },
+      round: { type: "string" },
+    });
+    return reviewSubmit(ctx, {
+      file: values.file,
+      verdict: values.verdict,
+      body: values.message,
+      round: values.round,
+    });
+  },
   status: async (ctx, args) => {
     parse(args, {});
     return status(ctx);
@@ -81,7 +98,7 @@ function parse<T extends Options>(args: string[], options: T) {
   });
 }
 
-export async function main(argv: string[], io: Output): Promise<number> {
+export async function main(argv: string[], io: Io): Promise<number> {
   // The command comes first: `lr <group> <verb> [options]` or `lr <verb> [options]`.
   const name = [argv.slice(0, 2).join(" "), argv[0] ?? ""].find((n) => n in COMMANDS);
   const wantsHelp =

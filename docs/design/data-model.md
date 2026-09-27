@@ -254,11 +254,15 @@ interface Review {
   round: number;
   reviewer: Actor;
   state: "draft" | "submitted"; // threads in a draft review are invisible to others until submit
-  verdict?: "changes_requested" | "approved";
-  body?: string; // markdown summary
-  submittedAt?: string;
+  verdict: "changes_requested" | "approved" | null; // null = comments only
+  body: string | null; // markdown summary
+  createdAt: string;
+  submittedAt: string | null;
 }
 ```
+
+A human's verdict becomes the round's verdict. An agent's verdict is recorded, but it doesn't
+decide the round. A reviewer can submit more than one review per round.
 
 "Approved with comments" is never stored. It's derived: `verdict = approved` and at least one
 thread is `open`.
@@ -316,7 +320,13 @@ type Anchor =
   | { kind: "feature" }
   | { kind: "phase"; phaseId: number }
   | { kind: "change"; changeId: string } // general comment on a commit
-  | { kind: "message"; changeId: string; lines?: [number, number] } // commit message
+  | {
+      kind: "message"; // commit message
+      changeId: string;
+      commitId: string; // commit whose description was commented on
+      lines: [number, number] | null; // null = the whole message
+      snippet: string[]; // the commented lines (or the whole message)
+    }
   | { kind: "final"; groupId: string; lines?: [number, number] } // squashed-commit message
   | { kind: "pr_body"; lines?: [number, number] }
   | {
@@ -333,8 +343,11 @@ type Anchor =
 
 `view` records which diff the reviewer was looking at: per-commit (`parent..change`), per-bookmark
 (`prev bookmark..bookmark`), or everything (`base..tip`). `changeId` is where the fix belongs. For
-new-side lines in a multi-change view, attribution comes from `jj file annotate` at `view.to`. For
-old-side lines and context lines, it falls back to `view.to`'s change.
+new-side lines in a multi-change view, attribution comes from `jj file annotate` at `view.to`: the
+latest change in the view that touched any of the commented lines. For old-side lines, and for
+lines no change in the view touched, it falls back to `view.to`'s change.
+
+(`final` and `pr_body` anchors arrive with finalization.)
 
 **Re-anchoring (per new round, per thread)**
 
@@ -350,6 +363,52 @@ old-side lines and context lines, it falls back to `view.to`'s change.
 
 Author notes follow the same process. Agents leave notes on changes that are still being edited, so
 their anchors are re-mapped at every `lr review create`.
+
+### Review submissions
+
+`lr review submit -F <review.json>` (or `-F -` for stdin) records a whole review at once. This is the
+path agents use. `--verdict` and `-m <body>` can stand in for the file, or override its fields.
+
+```jsonc
+{
+  "verdict": "changes_requested",   // or "approved"; omit for comments only
+  "body": "Summary for the author (markdown).",
+  "comments": [
+    // General comment on the feature.
+    { "body": "Feature-flag the rotation." },
+    // A phase, or one change (a unique prefix of its change id is enough).
+    { "phase": 2, "body": "…" },
+    { "change": "kxqp", "body": "…" },
+    // Code in one change's diff. `lines` is a number or [first, last], 1-based.
+    { "change": "kxqp", "path": "src/db.ts", "lines": [40, 41], "severity": "blocking",
+      "body": "Both need NOT NULL.", "suggestion": "expires_at: timestamp().notNull(),\n…" },
+    // Code in a phase's combined diff, or in the whole stack's (no change or phase).
+    { "phase": 1, "path": "src/db.ts", "lines": 40, "body": "…" },
+    { "path": "src/db.ts", "lines": 12, "side": "old", "body": "Why was this removed?" },
+    // A commit message (the whole message, or specific lines).
+    { "change": "kxqp", "message": true, "lines": 1, "severity": "nit", "body": "Imperative." }
+  ]
+}
+```
+
+`severity` is `blocking`, `suggestion`, `nit` or `question`. It's optional. `side` defaults to
+`new`.
+
+Validation happens in two passes, and each reports every problem at once, so an agent can fix them
+all in one go:
+
+1. **Shape:** unknown fields (so typos like `line` are caught), types, and combinations that don't
+   make sense. For example, `lines` without a `path` or `message`, or a `suggestion` without
+   `lines`.
+2. **Locations**, checked against the round's pinned jj operation, so it doesn't matter if the
+   stack has been rewritten since: the change is in the round, the phase has changes, the file
+   exists on that side of the view, and the lines are within the file or message.
+
+Nothing is recorded unless every comment resolves. The review goes on the latest round, or on
+`--round <n>`. Superseded and closed rounds are rejected, and a superseded round's error points to
+the current one. Each comment becomes a thread (numbered per feature) whose first entry is the
+comment. Agent comments start `proposed` when `[review] triage_agent_comments = true` is set in
+`.local-review.toml`, and `open` otherwise.
 
 ### Squash plan
 
@@ -458,7 +517,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
 | `lr note <change> <path>:<a>-<b> "<text>"`                               | author agent   | author note (was `TEMPORAL`)                                                  |
 | `lr review create [--final] [--allow-failing]`                           | author agent   | snapshot + checks; if a check fails, it exits non-zero and no round is opened |
-| `lr review submit -F <review.json>`                                      | reviewer agent | whole review, all comments at once                                            |
+| `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
 | `lr handoff [--json]`                                                    | author agent   | read the handoff                                                              |
 | `lr reply <thread> [--addressed] "<text>"`                               | author agent   | thread entry / status                                                         |
 | `lr final message <group> -F` · `lr final pr-body -F` · `lr final apply` | author agent   | finalization                                                                  |

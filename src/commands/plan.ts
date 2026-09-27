@@ -21,7 +21,7 @@ export async function planSubmit(
     throw new LrError(`feature "${feature.slug}" has no plan yet; use \`lr plan submit\``);
   }
 
-  const text = file === "-" ? await Bun.stdin.text() : await readFile(file);
+  const text = await ctx.readInput(file);
   const { phases } = parsePlan(text, feature.slug);
 
   const latestRound = ctx.store.latestRound(feature.slug);
@@ -57,10 +57,4 @@ export async function planShow(ctx: Context): Promise<number> {
     ctx.io.out(await Bun.file(path).text());
   }
   return 0;
-}
-
-async function readFile(path: string): Promise<string> {
-  const f = Bun.file(path);
-  if (!(await f.exists())) throw new LrError(`no such file: ${path}`);
-  return f.text();
 }

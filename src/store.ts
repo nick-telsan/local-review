@@ -5,15 +5,22 @@ import { formatActor, parseActor } from "./actor.ts";
 import { LrError } from "./errors.ts";
 import type {
   Actor,
+  Anchor,
   ChangeSnapshot,
   CheckRun,
   CheckStatus,
+  Entry,
   Feature,
   FeatureStatus,
   Phase,
   PlanVersion,
+  Review,
   Round,
   RoundStatus,
+  Severity,
+  Thread,
+  ThreadStatus,
+  Verdict,
 } from "./model.ts";
 import { repoDir } from "./paths.ts";
 
@@ -93,7 +100,59 @@ const MIGRATIONS = [
     FOREIGN KEY (feature, round) REFERENCES rounds(feature, n) ON DELETE CASCADE
   );
   `,
+  `
+  CREATE TABLE reviews (
+    id TEXT PRIMARY KEY,
+    feature TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    reviewer TEXT NOT NULL,
+    state TEXT NOT NULL,
+    verdict TEXT,
+    body TEXT,
+    created_at TEXT NOT NULL,
+    submitted_at TEXT,
+    FOREIGN KEY (feature, round) REFERENCES rounds(feature, n) ON DELETE CASCADE
+  );
+  CREATE INDEX reviews_by_round ON reviews(feature, round);
+  -- Threads belong to the feature, not a round: they carry across rounds and get re-anchored.
+  CREATE TABLE threads (
+    feature TEXT NOT NULL REFERENCES features(slug) ON DELETE CASCADE,
+    id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    anchor TEXT NOT NULL,
+    severity TEXT,
+    status TEXT NOT NULL,
+    anchor_state TEXT NOT NULL,
+    review_id TEXT REFERENCES reviews(id) ON DELETE CASCADE,
+    created_by TEXT NOT NULL,
+    created_in_round INTEGER,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (feature, id)
+  );
+  CREATE TABLE thread_entries (
+    id TEXT PRIMARY KEY,
+    feature TEXT NOT NULL,
+    thread_id INTEGER NOT NULL,
+    author TEXT NOT NULL,
+    body TEXT NOT NULL,
+    suggestion TEXT,
+    status_from TEXT,
+    status_to TEXT,
+    round INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (feature, thread_id) REFERENCES threads(feature, id) ON DELETE CASCADE
+  );
+  CREATE INDEX thread_entries_by_thread ON thread_entries(feature, thread_id, created_at);
+  `,
 ];
+
+export interface NewComment {
+  anchor: Anchor;
+  severity: Severity | null;
+  body: string;
+  suggestion: string | null;
+  status: ThreadStatus;
+}
 
 const now = () => new Date().toISOString();
 
@@ -216,6 +275,13 @@ export class Store {
   }
 
   // ── rounds ────────────────────────────────────────────────────────────────
+
+  getRound(slug: string, n: number): Round | null {
+    const row = this.db
+      .query("SELECT * FROM rounds WHERE feature = ? AND n = ?")
+      .get(slug, n) as RoundRow | null;
+    return row ? this.roundFromRow(row) : null;
+  }
 
   latestRound(slug: string): Round | null {
     const row = this.db
@@ -396,6 +462,152 @@ export class Store {
       .all(slug, n) as CheckRow[];
     return rows.map(checkFromRow);
   }
+
+  // ── reviews & threads ─────────────────────────────────────────────────────
+
+  /**
+   * Record a submitted review and its comments (one new thread each). A human's verdict becomes
+   * the round's verdict.
+   */
+  submitReview(
+    slug: string,
+    r: {
+      round: number;
+      reviewer: Actor;
+      verdict: Verdict | null;
+      body: string | null;
+      comments: NewComment[];
+    },
+  ): { review: Review; threads: Thread[] } {
+    return this.db.transaction(() => {
+      const at = now();
+      const review: Review = {
+        id: Bun.randomUUIDv7(),
+        round: r.round,
+        reviewer: r.reviewer,
+        state: "submitted",
+        verdict: r.verdict,
+        body: r.body,
+        createdAt: at,
+        submittedAt: at,
+      };
+      this.db
+        .query(
+          `INSERT INTO reviews (id, feature, round, reviewer, state, verdict, body, created_at, submitted_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          review.id,
+          slug,
+          review.round,
+          formatActor(review.reviewer),
+          review.state,
+          review.verdict,
+          review.body,
+          review.createdAt,
+          review.submittedAt,
+        );
+
+      let { next } = this.db
+        .query("SELECT COALESCE(MAX(id), 0) + 1 AS next FROM threads WHERE feature = ?")
+        .get(slug) as { next: number };
+      const insertThread = this.db.query(
+        `INSERT INTO threads (feature, id, kind, anchor, severity, status, anchor_state, review_id,
+           created_by, created_in_round, created_at)
+         VALUES (?, ?, 'comment', ?, ?, ?, 'current', ?, ?, ?, ?)`,
+      );
+      const threads: Thread[] = r.comments.map((c) => {
+        const thread: Thread = {
+          id: next++,
+          kind: "comment",
+          anchor: c.anchor,
+          severity: c.severity,
+          status: c.status,
+          anchorState: "current",
+          reviewId: review.id,
+          createdBy: r.reviewer,
+          createdInRound: r.round,
+          createdAt: at,
+          entries: [
+            {
+              id: Bun.randomUUIDv7(),
+              author: r.reviewer,
+              body: c.body,
+              suggestion: c.suggestion,
+              statusChange: null,
+              round: r.round,
+              createdAt: at,
+            },
+          ],
+        };
+        insertThread.run(
+          slug,
+          thread.id,
+          JSON.stringify(thread.anchor),
+          thread.severity,
+          thread.status,
+          review.id,
+          formatActor(thread.createdBy),
+          thread.createdInRound,
+          at,
+        );
+        this.insertEntry(slug, thread.id, thread.entries[0]!);
+        return thread;
+      });
+
+      if (r.reviewer.kind === "human" && r.verdict) {
+        this.db
+          .query("UPDATE rounds SET verdict = ? WHERE feature = ? AND n = ?")
+          .run(r.verdict, slug, r.round);
+      }
+      return { review, threads };
+    })();
+  }
+
+  private insertEntry(slug: string, threadId: number, e: Entry): void {
+    this.db
+      .query(
+        `INSERT INTO thread_entries (id, feature, thread_id, author, body, suggestion, status_from,
+           status_to, round, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        e.id,
+        slug,
+        threadId,
+        formatActor(e.author),
+        e.body,
+        e.suggestion,
+        e.statusChange?.from ?? null,
+        e.statusChange?.to ?? null,
+        e.round,
+        e.createdAt,
+      );
+  }
+
+  listReviews(slug: string, round: number): Review[] {
+    const rows = this.db
+      .query("SELECT * FROM reviews WHERE feature = ? AND round = ? ORDER BY created_at")
+      .all(slug, round) as ReviewRow[];
+    return rows.map(reviewFromRow);
+  }
+
+  /** Threads in id order, with their entries. */
+  listThreads(slug: string, filter: { reviewId?: string } = {}): Thread[] {
+    const rows = (
+      filter.reviewId
+        ? this.db
+            .query("SELECT * FROM threads WHERE feature = ? AND review_id = ? ORDER BY id")
+            .all(slug, filter.reviewId)
+        : this.db.query("SELECT * FROM threads WHERE feature = ? ORDER BY id").all(slug)
+    ) as ThreadRow[];
+    const entries = this.db.query(
+      "SELECT * FROM thread_entries WHERE feature = ? AND thread_id = ? ORDER BY created_at, id",
+    );
+    return rows.map((row) =>
+      threadFromRow(row, (entries.all(slug, row.id) as EntryRow[]).map(entryFromRow)),
+    );
+  }
 }
 
 // ── row mapping ─────────────────────────────────────────────────────────────
@@ -503,5 +715,81 @@ function checkFromRow(r: CheckRow): CheckRun {
     logPath: r.log_path,
     startedAt: r.started_at,
     finishedAt: r.finished_at,
+  };
+}
+
+interface ReviewRow {
+  id: string;
+  round: number;
+  reviewer: string;
+  state: string;
+  verdict: string | null;
+  body: string | null;
+  created_at: string;
+  submitted_at: string | null;
+}
+function reviewFromRow(r: ReviewRow): Review {
+  return {
+    id: r.id,
+    round: r.round,
+    reviewer: parseActor(r.reviewer),
+    state: r.state as Review["state"],
+    verdict: r.verdict as Verdict | null,
+    body: r.body,
+    createdAt: r.created_at,
+    submittedAt: r.submitted_at,
+  };
+}
+
+interface ThreadRow {
+  id: number;
+  kind: string;
+  anchor: string;
+  severity: string | null;
+  status: string;
+  anchor_state: string;
+  review_id: string | null;
+  created_by: string;
+  created_in_round: number | null;
+  created_at: string;
+}
+function threadFromRow(r: ThreadRow, entries: Entry[]): Thread {
+  return {
+    id: r.id,
+    kind: r.kind as Thread["kind"],
+    anchor: JSON.parse(r.anchor) as Anchor,
+    severity: r.severity as Severity | null,
+    status: r.status as ThreadStatus,
+    anchorState: r.anchor_state as Thread["anchorState"],
+    reviewId: r.review_id,
+    createdBy: parseActor(r.created_by),
+    createdInRound: r.created_in_round,
+    createdAt: r.created_at,
+    entries,
+  };
+}
+
+interface EntryRow {
+  id: string;
+  author: string;
+  body: string;
+  suggestion: string | null;
+  status_from: string | null;
+  status_to: string | null;
+  round: number | null;
+  created_at: string;
+}
+function entryFromRow(r: EntryRow): Entry {
+  return {
+    id: r.id,
+    author: parseActor(r.author),
+    body: r.body,
+    suggestion: r.suggestion,
+    statusChange:
+      r.status_from && r.status_to
+        ? { from: r.status_from as ThreadStatus, to: r.status_to as ThreadStatus }
+        : null,
+    round: r.round,
+    createdAt: r.created_at,
   };
 }

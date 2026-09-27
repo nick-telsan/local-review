@@ -10,18 +10,26 @@ export interface CheckConfig {
   timeoutMs: number;
 }
 
+export interface ReviewConfig {
+  /** Agent reviewers' comments start `proposed` and need a human to accept them. */
+  triageAgentComments: boolean;
+}
+
 export interface RepoConfig {
   /** Runs in the check workspace before checks at each commit (e.g. `bun install`). */
   setup: string | null;
   checks: CheckConfig[];
+  review: ReviewConfig;
 }
+
+const DEFAULT_REVIEW: ReviewConfig = { triageAgentComments: false };
 
 export const CONFIG_FILE = ".local-review.toml";
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 
 export async function loadRepoConfig(root: string): Promise<RepoConfig> {
   const file = Bun.file(join(root, CONFIG_FILE));
-  if (!(await file.exists())) return { setup: null, checks: [] };
+  if (!(await file.exists())) return { setup: null, checks: [], review: DEFAULT_REVIEW };
 
   let data: Record<string, unknown>;
   try {
@@ -70,10 +78,23 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
     });
   }
 
+  const review = { ...DEFAULT_REVIEW };
+  const rawReview = data.review ?? {};
+  if (typeof rawReview !== "object" || rawReview === null || Array.isArray(rawReview)) {
+    problems.push("review: must be a table ([review])");
+  } else {
+    const triage = (rawReview as Record<string, unknown>).triage_agent_comments;
+    if (triage !== undefined && typeof triage !== "boolean") {
+      problems.push("review.triage_agent_comments: must be true or false");
+    } else if (triage !== undefined) {
+      review.triageAgentComments = triage;
+    }
+  }
+
   if (problems.length > 0) {
     throw new LrError(`${CONFIG_FILE}:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
   }
-  return { setup: setup as string | null, checks };
+  return { setup: setup as string | null, checks, review };
 }
 
 export function parseDuration(text: string): number | null {

@@ -8,8 +8,8 @@ round. You and a reviewer agent comment on code and on commit messages, and deci
 get squashed. The agent revises, and the loop repeats until the change is approved. Then it's
 squashed into its final shape and handed off as a PR.
 
-> **Status:** early. Snapshots, checks, and plans work today. Reviews, threads, handoff,
-> finalization, and the UI are next. See [the design](docs/design/data-model.md).
+> **Status:** early. Plans, snapshots, checks, and submitting reviews work today. The handoff,
+> replies, finalization, and the UI are next. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -29,6 +29,8 @@ lr feature start auth-refresh --base 'trunk()'
 lr plan submit -F plan.md          # markdown with a `phases:` frontmatter block
 # … implement: one commit per task, `jj bookmark set <phase bookmark>` when a phase is done …
 lr review create                   # snapshot + checks; exits 1 if a check fails
+lr review submit -F review.json --as agent:codex        # a reviewer agent's review
+lr review submit --verdict approved -m "LGTM"            # yours
 lr status
 ```
 
@@ -56,6 +58,28 @@ Freeform context, decisions, risks…
 
 Commits can reference tasks with a `Plan-Task: 1.1` trailer.
 
+### Reviews
+
+A review file has an optional verdict, a summary, and comments on the feature, a phase, a
+change, a commit message, or specific lines of code:
+
+```json
+{
+  "verdict": "changes_requested",
+  "body": "Close. See the schema comment.",
+  "comments": [
+    { "change": "kxqp", "path": "src/db.ts", "lines": [40, 41], "severity": "blocking",
+      "body": "Both need NOT NULL.", "suggestion": "expires_at: timestamp().notNull()," },
+    { "change": "kxqp", "message": true, "severity": "nit", "body": "Imperative subject." },
+    { "body": "Feature-flag the rotation." }
+  ]
+}
+```
+
+Every location is checked against the round's snapshot, and a review with any bad location is
+rejected as a whole, with every problem listed. The full format is in
+[the design](docs/design/data-model.md#review-submissions).
+
 ### Checks
 
 Define checks in `.local-review.toml` at the repo root:
@@ -72,6 +96,13 @@ timeout = "10m"       # default 10m
 
 Checks run in a separate jj workspace, so your working copy is never touched. A passing result
 is reused as long as the commit and the command haven't changed.
+
+To require a human to accept agent reviewers' comments before they reach the author:
+
+```toml
+[review]
+triage_agent_comments = true
+```
 
 State lives in `~/.local-review/` (override with `$LOCAL_REVIEW_HOME`).
 

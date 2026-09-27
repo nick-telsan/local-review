@@ -1,6 +1,9 @@
 import { closeSync, existsSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type { CheckConfig, RepoConfig } from "./config.ts";
+
+export type CheckSettings = Pick<RepoConfig, "setup" | "checks">;
+
 import { LrError } from "./errors.ts";
 import { Jj } from "./jj.ts";
 import type { ChangeSnapshot, CheckRun, Phase } from "./model.ts";
@@ -49,7 +52,7 @@ export async function runChecks(opts: {
   store: Store;
   slug: string;
   featureDir: string;
-  config: RepoConfig;
+  config: CheckSettings;
   targets: CheckTarget[];
   trigger: CheckRun["trigger"];
   log: (line: string) => void;

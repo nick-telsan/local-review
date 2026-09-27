@@ -19,6 +19,8 @@ export async function status(ctx: Context): Promise<number> {
   const plan = feature.currentPlanVersion !== null ? ctx.currentPlan(feature) : null;
   const round = ctx.store.latestRound(feature.slug);
   const checks = round ? ctx.store.roundChecks(feature.slug, round.n) : [];
+  const reviews = round ? ctx.store.listReviews(feature.slug, round.n) : [];
+  const threads = ctx.store.listThreads(feature.slug);
 
   const lines = [
     `${feature.slug}: ${feature.title}`,
@@ -37,9 +39,23 @@ export async function status(ctx: Context): Promise<number> {
       for (const c of checks)
         lines.push(`  ${c.status.padEnd(6)} ${c.check} @ ${c.changeId.slice(0, 8)}`);
     }
+    if (reviews.length) {
+      lines.push("Reviews:");
+      for (const r of reviews) {
+        const count = threads.filter((t) => t.reviewId === r.id).length;
+        lines.push(
+          `  ${`${r.reviewer.kind}:${r.reviewer.name}`.padEnd(20)} ` +
+            `${(r.verdict ?? "commented").padEnd(17)} ${count} comment(s)`,
+        );
+      }
+    }
   }
+  const byStatus = Object.entries(Object.groupBy(threads, (t) => t.status)).map(
+    ([s, ts]) => `${ts!.length} ${s}`,
+  );
+  if (byStatus.length) lines.push(`Threads: ${byStatus.join(", ")}`);
   lines.push(`Next: ${NEXT[feature.status]}`);
 
-  ctx.print({ feature, plan, round, checks, next: NEXT[feature.status] }, lines);
+  ctx.print({ feature, plan, round, checks, reviews, threads, next: NEXT[feature.status] }, lines);
   return 0;
 }

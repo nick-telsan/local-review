@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import type { PlanVersion } from "../src/model.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
-import { lr, lrJson } from "./lr.ts";
+import { lr, lrJson, lrWithStdin } from "./lr.ts";
 
 let repo: TestRepo;
 let planFile: string;
@@ -21,7 +21,11 @@ afterEach(() => repo.cleanup());
 async function run(...argv: string[]) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await main(argv, { out: (t) => out.push(t), err: (t) => err.push(t) });
+  const code = await main(argv, {
+    out: (t) => out.push(t),
+    err: (t) => err.push(t),
+    stdin: async () => "",
+  });
   return { code, out: out.join("\n"), err: err.join("\n") };
 }
 
@@ -122,6 +126,12 @@ describe("lr plan", () => {
     const { data } = await lrJson<{ plan: PlanVersion }>(repo, "plan", "show");
     expect(data.plan.createdBy).toEqual({ kind: "agent", name: "claude-code" });
     expect(await Bun.file(data.plan.path).text()).toBe(TWO_PHASE_PLAN);
+  });
+
+  test("submit reads the plan from stdin with -F -", async () => {
+    const r = await lrWithStdin(repo, TWO_PHASE_PLAN, "plan", "submit", "-F", "-");
+    expect(r.code).toBe(0);
+    expect((await lr(repo, "plan", "show")).out).toBe(TWO_PHASE_PLAN);
   });
 
   test("status before any round", async () => {

@@ -1,5 +1,6 @@
 import { resolveActor } from "./actor.ts";
 import { LrError } from "./errors.ts";
+import { readInput } from "./io.ts";
 import { Jj } from "./jj.ts";
 import type { Actor, Feature, PlanVersion } from "./model.ts";
 import { featureDir } from "./paths.ts";
@@ -12,9 +13,11 @@ export interface GlobalOptions {
   json?: boolean;
 }
 
-export interface Output {
+/** All process I/O, injected at the entry point so tests can supply their own. */
+export interface Io {
   out: (text: string) => void;
   err: (text: string) => void;
+  stdin: () => Promise<string>;
 }
 
 export class Context {
@@ -23,11 +26,11 @@ export class Context {
     readonly store: Store,
     readonly actor: Actor,
     readonly json: boolean,
-    readonly io: Output,
+    readonly io: Io,
     private readonly featureFlag: string | undefined,
   ) {}
 
-  static async create(opts: GlobalOptions, io: Output): Promise<Context> {
+  static async create(opts: GlobalOptions, io: Io): Promise<Context> {
     const jj = await Jj.discover(opts.repo ?? process.cwd());
     const store = await Store.open(jj.root);
     return new Context(
@@ -42,6 +45,11 @@ export class Context {
 
   close(): void {
     this.store.close();
+  }
+
+  /** Read a file argument; `-` means stdin. */
+  readInput(path: string): Promise<string> {
+    return readInput(path, this.io.stdin);
   }
 
   featureDir(slug: string): string {
