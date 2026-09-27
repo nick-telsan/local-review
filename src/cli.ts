@@ -1,9 +1,11 @@
 import { parseArgs } from "node:util";
 import { featureList, featureStart } from "./commands/feature.ts";
+import { handoff } from "./commands/handoff.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
 import { reviewCreate } from "./commands/review.ts";
 import { status } from "./commands/status.ts";
 import { reviewSubmit } from "./commands/submit.ts";
+import { type ReplyAction, reply, threads } from "./commands/thread.ts";
 import { Context, type Io } from "./context.ts";
 import { LrError } from "./errors.ts";
 
@@ -18,6 +20,9 @@ Usage:
   lr review create [--allow-failing] [--skip-checks]
   lr review submit [-F <review.json>] [--verdict approved|changes_requested] [-m <body>]
                    [--round <n>]      record a review on the latest (or given) open round
+  lr handoff [--round <n>]        what the author needs to act on after a review
+  lr threads [--status <s,…> | --all]
+  lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]
   lr status
 
 Global options:
@@ -77,6 +82,36 @@ const COMMANDS: Record<string, Handler> = {
       verdict: values.verdict,
       body: values.message,
       round: values.round,
+    });
+  },
+  handoff: async (ctx, args) => {
+    const { values } = parse(args, { round: { type: "string" } });
+    return handoff(ctx, { round: values.round });
+  },
+  threads: async (ctx, args) => {
+    const { values } = parse(args, { status: { type: "string" }, all: { type: "boolean" } });
+    return threads(ctx, values);
+  },
+  reply: async (ctx, args) => {
+    const flags = {
+      addressed: { type: "boolean" },
+      resolve: { type: "boolean" },
+      dismiss: { type: "boolean" },
+      reopen: { type: "boolean" },
+      accept: { type: "boolean" },
+    } as const;
+    const { values, positionals } = parse(args, {
+      ...flags,
+      message: { type: "string", short: "m" },
+    });
+    const actions = (Object.keys(flags) as ReplyAction[]).filter((a) => values[a]);
+    if (actions.length > 1) {
+      throw new LrError(`pick one of ${actions.map((a) => `--${a}`).join(", ")}`);
+    }
+    const [id, ...words] = positionals;
+    return reply(ctx, id, {
+      action: actions[0] ?? null,
+      body: values.message ?? (words.length ? words.join(" ") : null),
     });
   },
   status: async (ctx, args) => {

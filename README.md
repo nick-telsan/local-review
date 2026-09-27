@@ -8,8 +8,8 @@ round. You and a reviewer agent comment on code and on commit messages, and deci
 get squashed. The agent revises, and the loop repeats until the change is approved. Then it's
 squashed into its final shape and handed off as a PR.
 
-> **Status:** early. Plans, snapshots, checks, and submitting reviews work today. The handoff,
-> replies, finalization, and the UI are next. See [the design](docs/design/data-model.md).
+> **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
+> handoff, and threaded replies. Finalization (squashing, the PR body) and the UI are next. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -31,6 +31,10 @@ lr plan submit -F plan.md          # markdown with a `phases:` frontmatter block
 lr review create                   # snapshot + checks; exits 1 if a check fails
 lr review submit -F review.json --as agent:codex        # a reviewer agent's review
 lr review submit --verdict approved -m "LGTM"            # yours
+lr handoff                         # what the author agent needs to act on, as markdown
+lr reply 12 --addressed "Added NOT NULL in kxqp"         # author
+lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
+lr threads                         # unsettled threads
 lr status
 ```
 

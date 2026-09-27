@@ -145,8 +145,10 @@ interface Round {
   planVersion: number;
   base: { commitId: string };
   changes: ChangeSnapshot[]; // ordered base → tip, linear stack only (v1)
-  status: "open" | "closed" | "superseded"; // superseded = replaced by a rebase mid-review
-  verdict?: "changes_requested" | "approved";
+  // closed = reviewed, then replaced by the next round; superseded = replaced before anyone
+  // reviewed it (or by a rebase mid-review)
+  status: "open" | "closed" | "superseded";
+  verdict: "changes_requested" | "approved" | null; // set by a human's review
   rebases: string[]; // RebaseEvent ids since the previous round
   createdBy: Actor;
   createdAt: string;
@@ -309,6 +311,19 @@ proposed ──(human accepts)──► open ──(fixer: --addressed)──►
   agent comments start `open`.
 - Only reviewers move threads to `resolved` / `dismissed`. The fixing agent can only mark
   `addressed`, or reply without changing status (that's how it pushes back).
+
+All of these go through `lr reply <thread> [<action>] [<message>]`:
+
+| Action        | From                              | To          | Who                                      |
+| ------------- | --------------------------------- | ----------- | ---------------------------------------- |
+| (none)        | any                               | (unchanged) | anyone; a message is required            |
+| `--addressed` | `open`                            | `addressed` | anyone; a message saying what changed    |
+| `--resolve`   | `open`, `addressed`               | `resolved`  | a human, or the agent that raised it     |
+| `--dismiss`   | `proposed`, `open`, `addressed`   | `dismissed` | a human, or the agent that raised it     |
+| `--reopen`    | `addressed`, `resolved`, `dismissed` | `open`   | a human, or the agent that raised it     |
+| `--accept`    | `proposed`                        | `open`      | a human                                  |
+
+`lr threads` lists unsettled threads (`proposed`, `open`, `addressed`), or `--status a,b` or `--all`.
 - Notes start `resolved`. A reviewer reply reopens a note as `open`.
 
 ### Anchor
@@ -439,41 +454,57 @@ runs `jj squash` per group.
 ## 4. Handoff format
 
 `lr handoff [--round N] [--json]`. Markdown is the default because agents read it best. `--json` returns
-the same content as structured data.
+the same content as structured data. It's read-only, so the agent can re-read it whenever it wants.
+
+**When there's something to hand off.** Only a human approves. A human's verdict on the round is
+the verdict. Without one, the handoff is "changes requested (by agent reviewers)" if an agent asked
+for changes or left open threads. That's the agent-reviews-first loop. Otherwise there's nothing to
+hand off yet (no reviews, or agents approved and a human hasn't weighed in), and `lr handoff` exits
+1 with the reason. `lr status` points at the handoff once it's ready. A human's verdict also moves
+the feature to `revising` or `finalizing`.
 
 Rules:
 
-- Include threads with status `open` (including reopened ones) and the context needed to act on
-  them. `resolved`, `dismissed`, `proposed` and notes are left out.
+- Include every `open` thread on the feature, from any round (reopened ones included), with the
+  context needed to act on them. `addressed` (waiting on the reviewer), `resolved`, `dismissed`,
+  `proposed` and notes are left out.
 - Group by where the fix goes: general → phase → change → file. The agent works change by change
   (`jj edit` / `jj squash --into`), so that's the useful order.
 - Inline the code snippet and the full thread, so the agent doesn't need extra lookups to
   understand a comment.
 - Always end with explicit next-step instructions that match the verdict.
 
-Example (changes requested):
+Example (changes requested), exactly as rendered:
 
 ````md
 # Review handoff: auth-refresh, round 2
 
-**Verdict:** changes requested
-**Reviews:** nick: request changes · codex: approve (4 comments, 3 accepted by nick)
-**Checks:** ✗ test @ auth-refresh/2-rotation (kxqpmwyz): log at ~/.local-review/…/r2-test.log
-**Plan:** v1 · 9 open threads (4 blocking)
+**Verdict:** changes requested  
+**Reviews:** agent:codex: approved · human:nick: changes requested  
+**Checks:** ✗ test @ `vtzqlmsr` (fail): log at ~/.local-review/…/checks/0199….log  
+**Plan:** v1 · 3 open thread(s) (2 blocking)
 
-## Reviewer summary (nick)
+## Reviewer summary (human:nick)
 
 > Schema looks right. Rotation has a race; see #14.
 
 ## General
 
-### #9 · blocking · open
+### #9 · blocking
 
-> **nick:** Rotation should be feature-flagged.
+> **human:nick**: Rotation should be feature-flagged.
 
 ## Phase 1: Schema + migration (`auth-refresh/1-schema`)
 
-### Change `kxqpmwyz` "Add refresh_tokens table"
+### Change `kxqpmwyz` "Adds refresh_tokens table"
+
+#### #13 · nit · commit message, line 1
+
+```
+Adds refresh_tokens table
+```
+
+> **human:nick**: Subject should be imperative: "Add…", not "Adds…".
 
 #### #12 · blocking · `src/db/schema.ts:40-41` (new)
 
@@ -482,7 +513,7 @@ Example (changes requested):
 41 |   revoked: boolean(),
 ```
 
-> **nick:** Both need `.notNull()`.
+> **human:nick**: Both need `.notNull()`.
 >
 > Suggested:
 >
@@ -490,22 +521,25 @@ Example (changes requested):
 > expires_at: timestamp().notNull(),
 > revoked: boolean().notNull().default(false),
 > ```
-
-#### #13 · nit · commit message
-
-> **nick:** Subject should be imperative: "Add…", not "Adds…".
+>
+> **agent:claude-code** (marked addressed): Added in kxqpmwyz.
+>
+> **human:nick** (marked open): `revoked` still allows null.
 
 ## Next steps
 
-1. Write a revised plan: `lr plan revise -F <file>`. Cover every thread above, or explain why not.
-2. Amend the listed changes in place. Don't stack fixup commits unless the plan says to.
-3. For each thread: `lr reply <id> --addressed "<what changed>"`, or `lr reply <id> "<why not>"`.
-4. When the checks you touched pass locally, run `lr review create`.
+1. Fix the failing checks listed above.
+2. Write a revised plan that covers every open thread above, and says why for any you won't change: `lr plan revise -F <file>`.
+3. Amend the changes the threads are on, in place (`jj edit <change>`, or `jj squash --into <change>`). Don't stack fixup commits unless the plan says to.
+4. Reply to every thread: `lr reply <id> --addressed "<what changed>"`, or `lr reply <id> "<why not>"` to push back.
+5. Run `lr review create` to open the next round.
 ````
 
-When the verdict is `approved`, the "Next steps" section switches to: address any open threads (if
-there are some), then draft one message per squash group (`lr final message <group> -F`), draft the
-PR body (`lr final pr-body -F`), then run `lr review create --final`.
+When the verdict is `approved` and threads are open, the steps are the same, except that the last
+one is a final `lr review create` "for a last look". Approved with nothing open means stop:
+finalization isn't built yet. Once it is, the approved path will draft one message per squash group
+(`lr final message <group> -F`), draft the PR body (`lr final pr-body -F`), and run
+`lr review create --final`.
 
 ## 5. Agent-facing CLI surface (sketch)
 
@@ -518,8 +552,9 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr note <change> <path>:<a>-<b> "<text>"`                               | author agent   | author note (was `TEMPORAL`)                                                  |
 | `lr review create [--final] [--allow-failing]`                           | author agent   | snapshot + checks; if a check fails, it exits non-zero and no round is opened |
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
-| `lr handoff [--json]`                                                    | author agent   | read the handoff                                                              |
-| `lr reply <thread> [--addressed] "<text>"`                               | author agent   | thread entry / status                                                         |
+| `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
+| `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see Thread)                                    |
+| `lr threads [--status <s,…>\|--all]`                                     | anyone         | list threads                                                                  |
 | `lr final message <group> -F` · `lr final pr-body -F` · `lr final apply` | author agent   | finalization                                                                  |
 | `lr status [--json]`                                                     | anyone         | feature state + what's expected next                                          |
 | `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack (or adopt one already done); see Rebase                      |

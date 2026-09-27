@@ -1,5 +1,6 @@
 import type { Context } from "../context.ts";
 import type { FeatureStatus } from "../model.ts";
+import { loadHandoff } from "./handoff.ts";
 import { describeStack } from "./review.ts";
 
 const NEXT: Record<FeatureStatus, string> = {
@@ -7,8 +8,8 @@ const NEXT: Record<FeatureStatus, string> = {
   implementing:
     "implement the plan (one commit per task, a bookmark per phase), then `lr review create`",
   in_review: "waiting on reviews",
-  revising: "apply the revised plan, then `lr review create`",
-  finalizing: "draft final commit messages and the PR body",
+  revising: "work through `lr handoff`, then `lr review create`",
+  finalizing: "address any open threads in `lr handoff`; finalization isn't in lr yet",
   final_review: "waiting on final review",
   done: "nothing — feature is done",
   abandoned: "nothing — feature was abandoned",
@@ -54,8 +55,13 @@ export async function status(ctx: Context): Promise<number> {
     ([s, ts]) => `${ts!.length} ${s}`,
   );
   if (byStatus.length) lines.push(`Threads: ${byStatus.join(", ")}`);
-  lines.push(`Next: ${NEXT[feature.status]}`);
+  // Agent reviewers can hand work back before any human verdict moves the feature along.
+  const next =
+    feature.status === "in_review" && round && loadHandoff(ctx, feature, round).ready
+      ? "agent reviewers requested changes: read `lr handoff`"
+      : NEXT[feature.status];
+  lines.push(`Next: ${next}`);
 
-  ctx.print({ feature, plan, round, checks, reviews, threads, next: NEXT[feature.status] }, lines);
+  ctx.print({ feature, plan, round, checks, reviews, threads, next }, lines);
   return 0;
 }

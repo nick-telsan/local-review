@@ -291,8 +291,8 @@ export class Store {
   }
 
   /**
-   * Open a new round. Any round still open is marked superseded. Returns the new round and the
-   * number of the round it superseded, if any.
+   * Open a new round. A round still open is replaced: `closed` if it was reviewed, `superseded`
+   * if nobody got to it. Returns the new round and what happened to the one it replaced.
    */
   createRound(
     slug: string,
@@ -304,15 +304,24 @@ export class Store {
       checkRunIds: string[];
       createdBy: Actor;
     },
-  ): { round: Round; superseded: number | null } {
+  ): { round: Round; replaced: { n: number; status: RoundStatus } | null } {
     return this.db.transaction(() => {
       const open = this.db
-        .query("SELECT n FROM rounds WHERE feature = ? AND status = 'open'")
-        .get(slug) as { n: number } | null;
-      if (open) {
+        .query(
+          `SELECT n, EXISTS (
+             SELECT 1 FROM reviews r WHERE r.feature = rounds.feature AND r.round = rounds.n
+               AND r.state = 'submitted'
+           ) AS reviewed
+           FROM rounds WHERE feature = ? AND status = 'open'`,
+        )
+        .get(slug) as { n: number; reviewed: number } | null;
+      const replaced = open
+        ? { n: open.n, status: (open.reviewed ? "closed" : "superseded") as RoundStatus }
+        : null;
+      if (replaced) {
         this.db
-          .query("UPDATE rounds SET status = 'superseded' WHERE feature = ? AND n = ?")
-          .run(slug, open.n);
+          .query("UPDATE rounds SET status = ? WHERE feature = ? AND n = ?")
+          .run(replaced.status, slug, replaced.n);
       }
       const { next } = this.db
         .query("SELECT COALESCE(MAX(n), 0) + 1 AS next FROM rounds WHERE feature = ?")
@@ -373,7 +382,7 @@ export class Store {
       for (const id of r.checkRunIds) link.run(slug, round.n, id);
 
       this.setFeatureStatus(slug, "in_review");
-      return { round, superseded: open?.n ?? null };
+      return { round, replaced };
     })();
   }
 
@@ -555,10 +564,12 @@ export class Store {
         return thread;
       });
 
+      // Only a human's verdict decides the round, and it hands the feature back to the author.
       if (r.reviewer.kind === "human" && r.verdict) {
         this.db
           .query("UPDATE rounds SET verdict = ? WHERE feature = ? AND n = ?")
           .run(r.verdict, slug, r.round);
+        this.setFeatureStatus(slug, r.verdict === "approved" ? "finalizing" : "revising");
       }
       return { review, threads };
     })();
@@ -593,20 +604,40 @@ export class Store {
   }
 
   /** Threads in id order, with their entries. */
-  listThreads(slug: string, filter: { reviewId?: string } = {}): Thread[] {
-    const rows = (
-      filter.reviewId
-        ? this.db
-            .query("SELECT * FROM threads WHERE feature = ? AND review_id = ? ORDER BY id")
-            .all(slug, filter.reviewId)
-        : this.db.query("SELECT * FROM threads WHERE feature = ? ORDER BY id").all(slug)
-    ) as ThreadRow[];
-    const entries = this.db.query(
-      "SELECT * FROM thread_entries WHERE feature = ? AND thread_id = ? ORDER BY created_at, id",
-    );
-    return rows.map((row) =>
-      threadFromRow(row, (entries.all(slug, row.id) as EntryRow[]).map(entryFromRow)),
-    );
+  listThreads(slug: string): Thread[] {
+    const rows = this.db
+      .query("SELECT * FROM threads WHERE feature = ? ORDER BY id")
+      .all(slug) as ThreadRow[];
+    return rows.map((row) => this.withEntries(slug, row));
+  }
+
+  getThread(slug: string, id: number): Thread | null {
+    const row = this.db
+      .query("SELECT * FROM threads WHERE feature = ? AND id = ?")
+      .get(slug, id) as ThreadRow | null;
+    return row ? this.withEntries(slug, row) : null;
+  }
+
+  /** Add an entry to a thread, applying its status change (if any). */
+  addEntry(slug: string, threadId: number, entry: Entry): Thread {
+    return this.db.transaction(() => {
+      this.insertEntry(slug, threadId, entry);
+      if (entry.statusChange) {
+        this.db
+          .query("UPDATE threads SET status = ? WHERE feature = ? AND id = ?")
+          .run(entry.statusChange.to, slug, threadId);
+      }
+      return this.getThread(slug, threadId)!;
+    })();
+  }
+
+  private withEntries(slug: string, row: ThreadRow): Thread {
+    const entries = this.db
+      .query(
+        "SELECT * FROM thread_entries WHERE feature = ? AND thread_id = ? ORDER BY created_at, id",
+      )
+      .all(slug, row.id) as EntryRow[];
+    return threadFromRow(row, entries.map(entryFromRow));
   }
 }
 

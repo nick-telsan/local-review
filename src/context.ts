@@ -2,7 +2,7 @@ import { resolveActor } from "./actor.ts";
 import { LrError } from "./errors.ts";
 import { readInput } from "./io.ts";
 import { Jj } from "./jj.ts";
-import type { Actor, Feature, PlanVersion } from "./model.ts";
+import type { Actor, Feature, PlanVersion, Round } from "./model.ts";
 import { featureDir } from "./paths.ts";
 import { Store } from "./store.ts";
 
@@ -72,6 +72,17 @@ export class Context {
     throw new LrError(
       `several active features (${active.map((f) => f.slug).join(", ")}); pick one with --feature or $LR_FEATURE`,
     );
+  }
+
+  /** Round `requested` (a CLI argument), or the latest round. */
+  round(feature: Feature, requested?: string): Round {
+    const latest = this.store.latestRound(feature.slug);
+    if (!latest) throw new LrError("no review round yet; open one with `lr review create`");
+    if (requested === undefined) return latest;
+    const n = Number(requested);
+    const found = Number.isInteger(n) ? this.store.getRound(feature.slug, n) : null;
+    if (!found) throw new LrError(`no round ${requested} (latest is ${latest.n})`);
+    return found;
   }
 
   currentPlan(feature: Feature): PlanVersion {

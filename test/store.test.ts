@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Actor, ChangeSnapshot, CheckRun, Phase } from "../src/model.ts";
+import type { Actor, ChangeSnapshot, CheckRun, Entry, Phase } from "../src/model.ts";
 import { repoDir } from "../src/paths.ts";
 import { Store } from "../src/store.ts";
 
@@ -99,23 +99,89 @@ describe("Store", () => {
 
   test("rounds round-trip their snapshot and put the feature in review", () => {
     expect(store.latestRound("f")).toBeNull();
-    const { round, superseded } = newRound([change("a"), change("b")]);
-    expect([round.n, round.status, superseded]).toEqual([1, "open", null]);
+    const { round, replaced } = newRound([change("a"), change("b")]);
+    expect([round.n, round.status, replaced]).toEqual([1, "open", null]);
     expect(store.latestRound("f")).toEqual(round);
     expect(store.getFeature("f")?.status).toBe("in_review");
   });
 
-  test("a new round supersedes the open one", () => {
+  test("a new round supersedes an unreviewed round and closes a reviewed one", () => {
     newRound();
-    const { round, superseded } = newRound();
-    expect([round.n, superseded]).toEqual([2, 1]);
+    const second = newRound();
+    expect([second.round.n, second.replaced]).toEqual([2, { n: 1, status: "superseded" }]);
+
+    store.submitReview("f", { round: 2, reviewer: agent, verdict: null, body: "hm", comments: [] });
+    const third = newRound();
+    expect(third.replaced).toEqual({ n: 2, status: "closed" });
     const statuses = store.db
       .query("SELECT n, status FROM rounds WHERE feature = 'f' ORDER BY n")
       .all();
     expect(statuses).toEqual([
       { n: 1, status: "superseded" },
-      { n: 2, status: "open" },
+      { n: 2, status: "closed" },
+      { n: 3, status: "open" },
     ]);
+  });
+
+  test("a human verdict decides the round and hands the feature back", () => {
+    newRound();
+    const human: Actor = { kind: "human", name: "nick" };
+    const review = (reviewer: Actor, verdict: "approved" | "changes_requested") =>
+      store.submitReview("f", { round: 1, reviewer, verdict, body: null, comments: [] });
+
+    review(agent, "approved");
+    expect([store.latestRound("f")?.verdict, store.getFeature("f")?.status]).toEqual([
+      null,
+      "in_review",
+    ]);
+    review(human, "changes_requested");
+    expect([store.latestRound("f")?.verdict, store.getFeature("f")?.status]).toEqual([
+      "changes_requested",
+      "revising",
+    ]);
+    review(human, "approved");
+    expect([store.latestRound("f")?.verdict, store.getFeature("f")?.status]).toEqual([
+      "approved",
+      "finalizing",
+    ]);
+  });
+
+  test("entries append to threads and apply status changes", () => {
+    newRound();
+    const { threads } = store.submitReview("f", {
+      round: 1,
+      reviewer: agent,
+      verdict: null,
+      body: null,
+      comments: [
+        {
+          anchor: { kind: "feature" },
+          severity: null,
+          body: "a",
+          suggestion: null,
+          status: "open",
+        },
+      ],
+    });
+    const id = threads[0]!.id;
+    const entry = (body: string, statusChange: Entry["statusChange"]) => ({
+      id: Bun.randomUUIDv7(),
+      author: agent,
+      body,
+      suggestion: null,
+      statusChange,
+      round: 1,
+      createdAt: new Date().toISOString(),
+    });
+    store.addEntry("f", id, entry("fixed", { from: "open", to: "addressed" }));
+    const thread = store.addEntry("f", id, entry("thanks", null));
+    expect(thread.status).toBe("addressed");
+    expect(thread.entries.map((e) => [e.body, e.statusChange])).toEqual([
+      ["a", null],
+      ["fixed", { from: "open", to: "addressed" }],
+      ["thanks", null],
+    ]);
+    expect(store.getThread("f", 99)).toBeNull();
   });
 
   test("check runs: passing lookup, updates, and round links", () => {

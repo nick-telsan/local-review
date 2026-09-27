@@ -2,7 +2,7 @@ import { AnchorResolver, describeAnchor } from "../anchors.ts";
 import { loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
-import type { Anchor, Review, Round, Thread } from "../model.ts";
+import type { Anchor, Feature, Review, Round, Thread } from "../model.ts";
 import { parseSubmission } from "../submission.ts";
 
 /** `lr review submit --json` output. */
@@ -32,7 +32,7 @@ export async function reviewSubmit(
   if (opts.body) data.body = opts.body;
   const submission = parseSubmission(data);
 
-  const round = pickRound(ctx, feature.slug, opts.round);
+  const round = pickRound(ctx, feature, opts.round);
   const plan = ctx.store.getPlanVersion(feature.slug, round.planVersion)!;
   const resolver = new AnchorResolver(ctx.jj, round, plan.phases);
 
@@ -81,17 +81,10 @@ export async function reviewSubmit(
 }
 
 /** The requested round, or the latest one; it must still be open. */
-function pickRound(ctx: Context, slug: string, requested: string | undefined): Round {
-  const latest = ctx.store.latestRound(slug);
-  if (!latest) throw new LrError("no review round yet; open one with `lr review create`");
-  let round = latest;
-  if (requested !== undefined) {
-    const n = Number(requested);
-    const found = Number.isInteger(n) ? ctx.store.getRound(slug, n) : null;
-    if (!found) throw new LrError(`no round ${requested} (latest is ${latest.n})`);
-    round = found;
-  }
+function pickRound(ctx: Context, feature: Feature, requested: string | undefined): Round {
+  const round = ctx.round(feature, requested);
   if (round.status === "superseded") {
+    const latest = ctx.round(feature);
     throw new LrError(`round ${round.n} was superseded; review round ${latest.n} instead`);
   }
   if (round.status !== "open") throw new LrError(`round ${round.n} is ${round.status}`);

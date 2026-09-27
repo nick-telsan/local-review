@@ -112,7 +112,7 @@ describe("lr review create", () => {
     const again = await lrJson<ReviewCreateOk>(repo, "review", "create");
     expect(again.code).toBe(0);
     expect(again.data.round.n).toBe(2);
-    expect(again.data.superseded).toBe(1);
+    expect(again.data.replaced).toEqual({ n: 1, status: "superseded" });
     expect(again.data.checks.every((c) => c.cached)).toBe(true);
   });
 

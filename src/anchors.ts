@@ -190,9 +190,14 @@ function short(c: ChangeSnapshot): string {
   return c.changeId.slice(0, 8);
 }
 
+/** `40` or `40-42`. */
+export function formatLines(l: [number, number]): string {
+  return l[0] === l[1] ? `${l[0]}` : `${l[0]}-${l[1]}`;
+}
+
 /** A short human-readable location, e.g. `src/db.ts:40-41 @kxqpmwyz`. */
 export function describeAnchor(anchor: Anchor): string {
-  const range = (l: [number, number]) => (l[0] === l[1] ? `${l[0]}` : `${l[0]}-${l[1]}`);
+  const range = formatLines;
   switch (anchor.kind) {
     case "feature":
       return "general";

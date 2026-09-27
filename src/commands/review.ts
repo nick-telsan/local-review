@@ -4,7 +4,7 @@ import { type CheckResult, checkTargets, runChecks } from "../checks.ts";
 import { loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
-import type { ChangeSnapshot, CheckRun, Phase, Round } from "../model.ts";
+import type { ChangeSnapshot, CheckRun, Phase, Round, RoundStatus } from "../model.ts";
 import { takeSnapshot } from "../snapshot.ts";
 
 export type CheckResultJson = CheckRun & { cached: boolean };
@@ -13,7 +13,8 @@ export type CheckResultJson = CheckRun & { cached: boolean };
 export interface ReviewCreateOk {
   ok: true;
   round: Round;
-  superseded: number | null;
+  /** The round this one replaced: `closed` if it had been reviewed, else `superseded`. */
+  replaced: { n: number; status: RoundStatus } | null;
   checks: CheckResultJson[];
   warnings: string[];
 }
@@ -95,7 +96,7 @@ export async function reviewCreate(
   const pinned = ctx.jj.at(snap.jjOpId);
   const patches = await Promise.all(snap.changes.map((c) => pinned.diffGit(c.commitId)));
 
-  const { round, superseded } = ctx.store.createRound(feature.slug, {
+  const { round, replaced } = ctx.store.createRound(feature.slug, {
     jjOpId: snap.jjOpId,
     planVersion: plan.version,
     baseCommitId: snap.baseCommitId,
@@ -115,13 +116,13 @@ export async function reviewCreate(
   const json: ReviewCreateOk = {
     ok: true,
     round,
-    superseded,
+    replaced,
     checks: checksJson,
     warnings: snap.warnings,
   };
   ctx.print(json, [
     `Round ${round.n} opened for ${feature.slug} (plan v${plan.version}, base ${snap.baseCommitId.slice(0, 8)})`,
-    ...(superseded !== null ? [`  superseded round ${superseded}`] : []),
+    ...(replaced ? [`  round ${replaced.n} is now ${replaced.status}`] : []),
     ...describeStack(snap.changes, plan.phases),
     results.length === 0
       ? "Checks: none run"
