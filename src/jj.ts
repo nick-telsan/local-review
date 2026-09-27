@@ -1,0 +1,149 @@
+import { LrError } from "./errors.ts";
+
+export interface JjCommit {
+  changeId: string;
+  commitId: string;
+  parents: string[];
+  description: string;
+  trailers: [string, string][];
+  bookmarks: string[];
+  conflict: boolean;
+  empty: boolean;
+  stats: { files: number; added: number; removed: number };
+}
+
+// One JSON object per line. `trailers` isn't serializable directly, so it's stringified as
+// tab-separated key/value lines and split on our side.
+const COMMIT_TEMPLATE = [
+  `"{\\"commit\\":" ++ json(self)`,
+  `",\\"bookmarks\\":" ++ json(local_bookmarks.map(|b| b.name()))`,
+  `",\\"trailers\\":" ++ json(stringify(trailers.map(|t| t.key() ++ "\\t" ++ t.value()).join("\\n")))`,
+  `",\\"conflict\\":" ++ json(conflict)`,
+  `",\\"empty\\":" ++ json(empty)`,
+  `",\\"added\\":" ++ self.diff().stat().total_added()`,
+  `",\\"removed\\":" ++ self.diff().stat().total_removed()`,
+  `",\\"files\\":" ++ self.diff().stat().files().len()`,
+  `"}\\n"`,
+].join(" ++ ");
+
+interface RawCommit {
+  commit: { commit_id: string; change_id: string; parents: string[]; description: string };
+  bookmarks: string[];
+  trailers: string;
+  conflict: boolean;
+  empty: boolean;
+  added: number;
+  removed: number;
+  files: number;
+}
+
+/** Quote a name (e.g. a bookmark) as a jj revset string literal. */
+export function revsetString(name: string): string {
+  return JSON.stringify(name);
+}
+
+/**
+ * Thin wrapper over the jj CLI. All reads go through templates, so user config
+ * (custom log templates, diff formats) can't change what we parse.
+ */
+export class Jj {
+  constructor(
+    /** Workspace root this instance operates on. */
+    readonly root: string,
+    /** When set, every command reads the repo as of this operation. */
+    readonly atOp: string | null = null,
+  ) {}
+
+  static async discover(cwd: string): Promise<Jj> {
+    const proc = Bun.spawn(["jj", "--no-pager", "--color=never", "root"], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) throw new LrError(`not in a jj repo (${cwd}): ${err.trim()}`);
+    return new Jj(out.trim());
+  }
+
+  at(opId: string): Jj {
+    return new Jj(this.root, opId);
+  }
+
+  async run(args: string[]): Promise<string> {
+    const cmd = ["jj", "--no-pager", "--color=never", "-R", this.root];
+    if (this.atOp) cmd.push("--at-op", this.atOp);
+    cmd.push(...args);
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (code !== 0) {
+      throw new LrError(`jj ${args.join(" ")} failed (exit ${code}):\n${err.trim()}`);
+    }
+    return out;
+  }
+
+  /** Snapshot the working copy, then return the resulting operation id. */
+  async snapshotOp(): Promise<string> {
+    if (this.atOp) return this.atOp;
+    await this.run(["util", "snapshot"]);
+    const id = await this.run([
+      "op",
+      "log",
+      "-n1",
+      "--no-graph",
+      "--ignore-working-copy",
+      "-T",
+      "id",
+    ]);
+    return id.trim();
+  }
+
+  /** Commits in `revset`, in jj's default order (children before parents). */
+  async commits(revset: string): Promise<JjCommit[]> {
+    const out = await this.run(["log", "--no-graph", "-r", revset, "-T", COMMIT_TEMPLATE]);
+    return out
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        const raw = JSON.parse(line) as RawCommit;
+        return {
+          changeId: raw.commit.change_id,
+          commitId: raw.commit.commit_id,
+          parents: raw.commit.parents,
+          description: raw.commit.description,
+          trailers: parseTrailers(raw.trailers),
+          bookmarks: raw.bookmarks,
+          conflict: raw.conflict,
+          empty: raw.empty,
+          stats: { files: raw.files, added: raw.added, removed: raw.removed },
+        };
+      });
+  }
+
+  async single(revset: string): Promise<JjCommit> {
+    const found = await this.commits(revset);
+    if (found.length !== 1) {
+      throw new LrError(`expected revset ${revset} to resolve to one commit, got ${found.length}`);
+    }
+    return found[0]!;
+  }
+
+  async diffGit(rev: string): Promise<string> {
+    return this.run(["diff", "--git", "-r", rev]);
+  }
+}
+
+function parseTrailers(text: string): [string, string][] {
+  if (!text) return [];
+  return text.split("\n").map((line) => {
+    const tab = line.indexOf("\t");
+    return [line.slice(0, tab), line.slice(tab + 1)];
+  });
+}
