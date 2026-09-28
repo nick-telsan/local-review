@@ -926,6 +926,101 @@ tr.picked td.code {
   background: var(--accent-soft);
 }
 
+/* Markdown */
+
+.markdown {
+  max-width: 820px;
+  overflow-wrap: anywhere;
+}
+.markdown h1 {
+  font-size: 20px;
+  margin: 20px 0 8px;
+}
+.markdown h2 {
+  font-size: 16px;
+  margin: 20px 0 8px;
+}
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 14px;
+  margin: 16px 0 6px;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre {
+  margin: 0 0 10px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 24px;
+}
+.markdown li.task-list-item {
+  list-style: none;
+  margin-left: -20px;
+}
+.markdown li.task-list-item input {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+.markdown table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown table th,
+.markdown table td {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.markdown table th {
+  background: var(--sunken);
+  font-weight: 600;
+}
+.markdown tbody tr:nth-child(2n) {
+  background: var(--sunken);
+}
+.markdown li > ul,
+.markdown li > ol,
+.markdown li > p {
+  margin: 4px 0;
+}
+.markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.markdown pre {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--sunken);
+  overflow-x: auto;
+}
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
 /* Texts reviewed line by line: messages and the PR body */
 
 table.text-lines {
@@ -1049,76 +1144,6 @@ table.message-lines tr.line:first-child td.code {
   cursor: pointer;
   font-weight: 600;
   margin-bottom: 8px;
-}
-
-/* Markdown */
-
-.markdown {
-  max-width: 820px;
-  overflow-wrap: anywhere;
-}
-.markdown h1 {
-  font-size: 20px;
-  margin: 20px 0 8px;
-}
-.markdown h2 {
-  font-size: 16px;
-  margin: 20px 0 8px;
-}
-.markdown h3,
-.markdown h4,
-.markdown h5,
-.markdown h6 {
-  font-size: 14px;
-  margin: 16px 0 6px;
-}
-.markdown > :first-child {
-  margin-top: 0;
-}
-.markdown p,
-.markdown ul,
-.markdown ol,
-.markdown blockquote,
-.markdown pre {
-  margin: 0 0 10px;
-}
-.markdown ul,
-.markdown ol {
-  padding-left: 24px;
-}
-.markdown li.task {
-  list-style: none;
-  margin-left: -18px;
-}
-.markdown li > ul,
-.markdown li > ol,
-.markdown li > p {
-  margin: 4px 0;
-}
-.markdown code {
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: var(--sunken);
-}
-.markdown .code-block {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--sunken);
-  overflow-x: auto;
-}
-.markdown .code-block code {
-  padding: 0;
-  background: none;
-}
-.markdown blockquote {
-  padding-left: 12px;
-  border-left: 3px solid var(--border);
-  color: var(--muted);
-}
-.markdown hr {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 16px 0;
 }
 
 /* Since an earlier round */

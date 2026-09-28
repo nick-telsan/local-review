@@ -25,8 +25,8 @@ the why isn't obvious.
 `bunfig.toml` pins exact versions and refuses packages published less than 3 days ago. Don't
 bypass either (no `--minimum-release-age=0`, no `^` ranges). Avoid runtime dependencies:
 `bun:sqlite`, `Bun.YAML`, `Bun.TOML`, `Bun.spawn`, and `node:util` `parseArgs` cover what we
-need so far. The exception is React (`react`, `react-dom`), which only the web UI uses and which is
-bundled into the page.
+need so far. The exceptions are React (`react`, `react-dom`) and markdown rendering
+(`react-markdown`, `remark-gfm`), which only the web UI uses and which are bundled into the page.
 
 ## Code conventions
 

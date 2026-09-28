@@ -823,7 +823,9 @@ line, so they take comments like a change's message does.
 **The plan.** A round's plan page shows the plan version it was taken against, phase by phase:
 each task with the changes whose `Plan-Task` names it (or none), the phase's changes that name no
 task, and below, anything outside the plan. Phase comments go there. The body is rendered as
-markdown (a small built-in subset; text is never rendered as HTML). Other versions can be read,
+GitHub-flavored markdown (tables, task lists, strikethrough) by `react-markdown`, which builds React
+elements: raw HTML shows as text, unsafe link schemes are dropped, and images become links, so
+nothing is fetched until someone clicks. Other versions can be read,
 each with a line diff from the one before, but only the round's version shows coverage or takes
 comments, since those are on the round's phases.
 
