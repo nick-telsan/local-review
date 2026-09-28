@@ -19,6 +19,8 @@ export function ThreadList({ threads }: { threads: ThreadView[] }) {
 }
 
 const range = ([a, b]: [number, number]) => (a === b ? `${a}` : `${a}–${b}`);
+const lines = (l: [number, number] | null) =>
+  l === null ? "" : `, ${l[0] === l[1] ? "line" : "lines"} ${range(l)}`;
 
 /** Where a thread points, for threads not shown inline. */
 export function describe(a: Anchor): string {
@@ -30,13 +32,15 @@ export function describe(a: Anchor): string {
     case "change":
       return `change ${short(a.changeId)}`;
     case "message":
-      return `message of ${short(a.changeId)}${a.lines ? `, lines ${range(a.lines)}` : ""}`;
+      return `message of ${short(a.changeId)}${lines(a.lines)}`;
     case "code":
       return `${a.path}:${range(a.lines)}${a.side === "old" ? " (old side)" : ""} @ ${short(a.changeId)}`;
     case "final":
-      return `final commit ${a.groupId}${a.lines ? `, lines ${range(a.lines)}` : ""}`;
+      return `final commit ${a.groupId}${lines(a.lines)}`;
     case "pr_body":
-      return `the PR body${a.lines ? `, lines ${range(a.lines)}` : ""}`;
+      return `the PR body${lines(a.lines)}`;
+    case "plan":
+      return `plan v${a.version}${lines(a.lines)}`;
   }
 }
 

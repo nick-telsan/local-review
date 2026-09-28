@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { resolveActor } from "./actor.ts";
 import { LrError } from "./errors.ts";
 import { readInput } from "./io.ts";
@@ -102,6 +103,11 @@ export class Context {
     const found = Number.isInteger(n) ? this.store.getRound(feature.slug, n) : null;
     if (!found) throw new LrError(`no round ${requested} (latest is ${latest.n})`);
     return found;
+  }
+
+  /** A plan version's file, frontmatter included. */
+  planText(slug: string, plan: PlanVersion): Promise<string> {
+    return Bun.file(join(this.featureDir(slug), plan.path)).text();
   }
 
   currentPlan(feature: Feature): PlanVersion {

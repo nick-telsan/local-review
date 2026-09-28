@@ -72,7 +72,7 @@ export async function recordReview(
       );
     }
   }
-  const resolver = resolverFor(ctx, feature, round);
+  const resolver = await resolverFor(ctx, feature, round);
 
   const anchors: Anchor[] = [];
   const problems: string[] = [];
@@ -113,12 +113,13 @@ export async function resolveComment(
   comment: unknown,
 ): Promise<Anchor> {
   const [c] = parseSubmission({ comments: [comment] }).comments;
-  return resolverFor(ctx, feature, round).resolve(c!);
+  return (await resolverFor(ctx, feature, round)).resolve(c!);
 }
 
-function resolverFor(ctx: Context, feature: Feature, round: Round): AnchorResolver {
+async function resolverFor(ctx: Context, feature: Feature, round: Round): Promise<AnchorResolver> {
   const plan = ctx.store.getPlanVersion(feature.slug, round.planVersion)!;
-  return new AnchorResolver(ctx.jj, round, plan.phases);
+  const text = await ctx.planText(feature.slug, plan);
+  return new AnchorResolver(ctx.jj, round, plan.phases, { version: plan.version, text });
 }
 
 /** The requested round, or the latest one; it must still be open. */

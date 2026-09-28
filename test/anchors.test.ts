@@ -27,6 +27,7 @@ const comment = (fields: Partial<CommentInput>): CommentInput => ({
   message: false,
   final: null,
   prBody: false,
+  plan: false,
   severity: null,
   body: "x",
   suggestion: null,

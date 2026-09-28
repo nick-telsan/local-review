@@ -421,6 +421,7 @@ type Anchor =
     }
   | { kind: "final"; groupId: string; lines: [number, number] | null; snippet: string[] } // final round
   | { kind: "pr_body"; lines: [number, number] | null; snippet: string[] } // final round
+  | { kind: "plan"; version: number; lines: [number, number] | null; snippet: string[] }
   | {
       kind: "code";
       view: { from: RevRef; to: RevRef }; // the diff the comment was made in
@@ -439,7 +440,9 @@ new-side lines in a multi-change view, attribution comes from `jj file annotate`
 latest change in the view that touched any of the commented lines. For old-side lines, and for
 lines no change in the view touched, it falls back to `view.to`'s change.
 
-`final` and `pr_body` anchors point into a final round's frozen messages and PR body.
+`final` and `pr_body` anchors point into a final round's frozen messages and PR body. `plan`
+anchors point into the plan file (frontmatter included, so line numbers match the file) of the
+version the round was taken against.
 
 **Re-anchoring**
 
@@ -476,7 +479,11 @@ Per anchor kind:
 5. **Commit messages.** A whole-message comment goes outdated if the message changes at all. A
    line-range comment stays put if those lines are unchanged, or moves to a unique exact match of
    its snippet.
-6. **Phases** go outdated when the current plan no longer has them. **General** threads are always
+6. **The plan.** Plan comments move onto the new round's plan version, like message comments: a
+   whole-plan comment goes outdated if the plan changed at all, and a line-range comment stays put
+   or moves to a unique exact match of its snippet. So a revision that rewrites the commented text
+   outdates the comment, which is usually what addressing it means.
+7. **Phases** go outdated when the current plan no longer has them. **General** threads are always
    current.
 
 Notes follow the same process, and resolved notes are carried too, because reviewers read them
@@ -509,7 +516,9 @@ path agents use. `--verdict` and `-m <body>` can stand in for the file, or overr
     { "change": "kxqp", "message": true, "lines": 1, "severity": "nit", "body": "Imperative." },
     // Final rounds only: a final commit's message (by group id), or the PR body.
     { "final": "2a", "lines": 1, "body": "Say what rotates." },
-    { "pr_body": true, "lines": [3, 4], "body": "Mention the backfill." }
+    { "pr_body": true, "lines": [3, 4], "body": "Mention the backfill." },
+    // The plan the round was taken against, whole or by lines of its file.
+    { "plan": true, "lines": [20, 22], "body": "Why not hash the tokens now?" }
   ]
 }
 ```
@@ -610,7 +619,8 @@ Rules:
   Outdated threads are marked, with the snippet as it was. `addressed` (waiting on the reviewer),
   `resolved`, `dismissed` and `proposed` threads are left out. That includes notes, unless
   someone reopened one.
-- Group by where the fix goes: general → phase → change → file. The agent works change by change
+- Group by where the fix goes: general → final commits → PR body → the plan → phase → change →
+  file. The agent works change by change
   (`jj edit` / `jj squash --into`), so that's the useful order.
 - Inline the code snippet and the full thread, so the agent doesn't need extra lookups to
   understand a comment.
@@ -804,8 +814,8 @@ server-sent event stream when it moves. The page then refetches what it shows.
   change, as `lr diff` compares them. A changed change's interdiff is parsed into files, and a
   message edit is split out of them. Rounds are snapshots, so the server keeps recent comparisons.
 - `POST …/rounds/:n/draft/comments`, `PUT`/`DELETE …/draft/comments/:id`: the actor's draft comments,
-  in review-file form (`change`, `path`, `lines`, `side`, `message`, `final`, `pr_body`, `severity`,
-  `body`, `suggestion`).
+  in review-file form (`change`, `path`, `lines`, `side`, `message`, `final`, `pr_body`, `plan`,
+  `severity`, `body`, `suggestion`).
 - `PUT …/rounds/:n/draft` (verdict and summary, saved as they're written), `DELETE …/draft`
   (discard), `POST …/draft/submit` (record it as a review).
 - `POST /api/features/:slug/threads/:id/replies` (`action`, `body`): like `lr reply`. The round view
@@ -822,7 +832,8 @@ line, so they take comments like a change's message does.
 
 **The plan.** A round's plan page shows the plan version it was taken against, phase by phase:
 each task with the changes whose `Plan-Task` names it (or none), the phase's changes that name no
-task, and below, anything outside the plan. Phase comments go there. The body is rendered as
+task, and below, anything outside the plan. Phase comments go there, and so do plan comments: the
+plan file shows as numbered lines while the round takes comments, with a rendered preview. The body is rendered as
 GitHub-flavored markdown (tables, task lists, strikethrough) by `react-markdown`, which builds React
 elements: raw HTML shows as text, unsafe link schemes are dropped, and images become links, so
 nothing is fetched until someone clicks. Other versions can be read,

@@ -22,6 +22,8 @@ export class AnchorResolver {
     jj: Jj,
     stack: Round | Snapshot,
     private readonly phases: Phase[],
+    /** The plan the round was taken against, for comments on it. */
+    private readonly plan: { version: number; text: string } | null = null,
   ) {
     this.jj = jj.at(stack.jjOpId);
     const round = "n" in stack ? stack : null;
@@ -31,6 +33,7 @@ export class AnchorResolver {
 
   async resolve(c: CommentInput): Promise<Anchor> {
     if (c.final !== null || c.prBody) return this.finalAnchor(c);
+    if (c.plan) return this.planAnchor(c.lines);
     const change = c.change === null ? null : findChange(this.round.changes, c.change, this.where);
 
     if (c.message) {
@@ -77,6 +80,19 @@ export class AnchorResolver {
     return c.final !== null
       ? { kind: "final", groupId: c.final, lines: c.lines, snippet }
       : { kind: "pr_body", lines: c.lines, snippet };
+  }
+
+  /** A comment on the plan file, whole or some of its lines. */
+  private planAnchor(lines: [number, number] | null): Anchor {
+    if (!this.plan) throw new LrError(`${this.where} has no plan to comment on`);
+    const text = splitLines(this.plan.text);
+    if (lines) checkRange(lines, text.length, `plan v${this.plan.version}`);
+    return {
+      kind: "plan",
+      version: this.plan.version,
+      lines,
+      snippet: lines ? text.slice(lines[0] - 1, lines[1]) : text,
+    };
   }
 
   private phaseChanges(phaseId: number): ChangeSnapshot[] {
@@ -260,5 +276,7 @@ export function describeAnchor(anchor: Anchor): string {
       return `final ${anchor.groupId}${anchor.lines ? `:${range(anchor.lines)}` : ""}`;
     case "pr_body":
       return `PR body${anchor.lines ? `:${range(anchor.lines)}` : ""}`;
+    case "plan":
+      return `plan v${anchor.version}${anchor.lines ? `:${range(anchor.lines)}` : ""}`;
   }
 }

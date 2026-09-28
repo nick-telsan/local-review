@@ -9,6 +9,7 @@ import { Markdown } from "./Markdown.tsx";
 import { draftsOn, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
 import { useSince } from "./since.tsx";
+import { TextLines } from "./TextLines.tsx";
 import { ThreadList } from "./Thread.tsx";
 import { ActorName, ErrorBox, Loading, short, subject, Time } from "./ui.tsx";
 
@@ -17,6 +18,7 @@ export const planPath = (view: RoundView) =>
 
 /** The plan the round was taken against, next to what the round implements; and its versions. */
 export function PlanPane({ view, base }: { view: RoundView; base: string }) {
+  const review = useReview();
   const { data, error } = useApi<PlanView>(planPath(view));
   const [chosen, setChosen] = useState<number | null>(null);
   if (error) return <ErrorBox error={error} />;
@@ -113,7 +115,18 @@ export function PlanPane({ view, base }: { view: RoundView; base: string }) {
 
       <section>
         <h2>The plan</h2>
-        <Markdown text={shown.body} />
+        {v === data.version ? (
+          <TextLines
+            text={shown.text}
+            threads={view.threads.filter((t) => t.placement.on === "plan")}
+            drafts={draftsOn(review.drafts, "plan")}
+            target={{ plan: true }}
+            addLabel="Comment on the whole plan"
+            preview={{ text: shown.body, breaks: false }}
+          />
+        ) : (
+          <Markdown text={shown.body} />
+        )}
       </section>
     </article>
   );

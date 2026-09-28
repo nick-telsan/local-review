@@ -15,6 +15,12 @@ import type { Store } from "./store.ts";
 type CodeAnchor = Extract<Anchor, { kind: "code" }>;
 type MessageAnchor = Extract<Anchor, { kind: "message" }>;
 
+/** A plan version's file, which plan comments are placed in. */
+export interface PlanFile {
+  version: number;
+  text: string;
+}
+
 /** Where a thread landed in a new round. Outdated threads keep their last good anchor and round. */
 export interface Placement {
   anchor: Anchor;
@@ -57,6 +63,8 @@ export async function reanchorThreads(input: {
   slug: string;
   round: Round;
   phases: Phase[];
+  /** The plan the new round was taken against. */
+  plan: PlanFile;
 }): Promise<ReanchoredThread[]> {
   const { store, slug, round } = input;
   const threads = store
@@ -65,7 +73,7 @@ export async function reanchorThreads(input: {
       (t) =>
         carried(t) && (t.anchorRound === null ? t.anchorStack !== null : t.anchorRound < round.n),
     );
-  const reanchorer = new Reanchorer(input.jj, round, input.phases);
+  const reanchorer = new Reanchorer(input.jj, round, input.phases, input.plan);
   const rounds = new Map<number, Round>();
   const placed: (Placement & { id: number })[] = [];
   for (const t of threads) {
@@ -91,6 +99,7 @@ export class Reanchorer {
     jj: Jj,
     private readonly to: Round,
     private readonly phases: Phase[],
+    private readonly plan: PlanFile,
   ) {
     this.jj = jj.at(to.jjOpId);
   }
@@ -130,6 +139,11 @@ export class Reanchorer {
       case "pr_body": {
         const placed = followLines(splitLines(this.to.final!.prBody), a.lines, a.snippet);
         return placed && { ...a, ...placed };
+      }
+      case "plan": {
+        // Onto the plan the new round was taken against, which may be a revision.
+        const placed = followLines(splitLines(this.plan.text), a.lines, a.snippet);
+        return placed && { ...a, version: this.plan.version, ...placed };
       }
     }
   }
@@ -308,7 +322,7 @@ function sameLocation(a: Anchor, b: Anchor): boolean {
         ? [x.kind, x.changeId, x.lines]
         : x.kind === "final"
           ? [x.kind, x.groupId, x.lines]
-          : x.kind === "pr_body"
+          : x.kind === "pr_body" || x.kind === "plan"
             ? [x.kind, x.lines]
             : x;
   return JSON.stringify(key(a)) === JSON.stringify(key(b));

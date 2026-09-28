@@ -13,6 +13,8 @@ export interface CommentInput {
   final: string | null;
   /** The PR body (final rounds only). */
   prBody: boolean;
+  /** The plan the round was taken against. */
+  plan: boolean;
   severity: Severity | null;
   body: string;
   suggestion: string | null;
@@ -35,6 +37,7 @@ const COMMENT_FIELDS = new Set([
   "message",
   "final",
   "pr_body",
+  "plan",
   "severity",
   "body",
   "suggestion",
@@ -139,6 +142,8 @@ function parseComment(c: unknown, where: string, problems: string[]): CommentInp
   const prBody = c.pr_body ?? false;
   if (typeof prBody !== "boolean") problems.push(`${where}.pr_body: must be true or false`);
   const onFinal = final !== null || prBody === true;
+  const plan = c.plan ?? false;
+  if (typeof plan !== "boolean") problems.push(`${where}.plan: must be true or false`);
 
   const severity = c.severity ?? null;
   if (severity !== null && !SEVERITIES.includes(severity as Severity)) {
@@ -164,9 +169,18 @@ function parseComment(c: unknown, where: string, problems: string[]): CommentInp
   if (final !== null && prBody === true) {
     problems.push(`${where}: a comment is on a final commit or the PR body, not both`);
   }
-  if (rawLines !== null && path === null && message !== true && !onFinal) {
+  if (
+    plan === true &&
+    (change !== null || phase !== null || path !== null || message === true || onFinal)
+  ) {
     problems.push(
-      `${where}: lines only apply to a file (path), a message, a final commit, or the PR body`,
+      `${where}: plan comments stand alone (no change, phase, path, message, final, or pr_body)`,
+    );
+  }
+  if (rawLines !== null && path === null && message !== true && !onFinal && plan !== true) {
+    problems.push(
+      `${where}: lines only apply to a file (path), a message, a final commit, the PR body, or ` +
+        "the plan",
     );
   }
   if (suggestion !== null && rawLines === null) {
@@ -183,6 +197,7 @@ function parseComment(c: unknown, where: string, problems: string[]): CommentInp
     message: message as boolean,
     final: final as string | null,
     prBody: prBody as boolean,
+    plan: plan as boolean,
     severity: severity as Severity | null,
     body: body as string,
     suggestion: suggestion as string | null,

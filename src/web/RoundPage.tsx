@@ -190,7 +190,11 @@ function Sidebar({
   selected: string | null;
   since: Since | null;
 }) {
-  const general = view.threads.filter((t) => threadChange(t) === null && isUnsettled(t)).length;
+  const on = (...kinds: ThreadView["placement"]["on"][]) =>
+    view.threads.filter((t) => kinds.includes(t.placement.on) && isUnsettled(t)).length;
+  // The plan page is where phase and plan comments are made; the overview has the rest.
+  const general = on("feature", "gone", "final", "pr_body");
+  const onPlan = on("phase", "plan");
   const href = since?.href ?? ((path: string) => path);
   const compared = (id: string) => (since?.on ? since.change(id) : undefined);
   const removed = since?.on
@@ -206,8 +210,10 @@ function Sidebar({
         to={href(`${base}/plan`)}
         className={`side-item overview${selected === "plan" ? " current" : ""}`}
       >
-        <span>Plan</span>
-        <span className="muted mono">v{view.round.planVersion}</span>
+        <span>
+          Plan <span className="muted mono">v{view.round.planVersion}</span>
+        </span>
+        {onPlan > 0 && <span className="count">{onPlan}</span>}
       </Link>
       {byPhase(view.round.changes, view.phases).map(({ phase, changes }) => (
         <section key={phase?.id ?? "none"} className="side-phase">
@@ -458,7 +464,7 @@ function FinalRound({ view }: { view: RoundView }) {
           drafts={draftsOn(review.drafts, "pr_body")}
           target={{ pr_body: true }}
           addLabel="Comment on the whole PR body"
-          markdown
+          preview={{ text: final.prBody, breaks: true }}
         />
       </section>
     </>

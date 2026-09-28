@@ -28,7 +28,7 @@ export function TextLines({
   target,
   addLabel,
   className,
-  markdown = false,
+  preview: rendered,
 }: {
   text: string;
   threads: ThreadView[];
@@ -37,13 +37,16 @@ export function TextLines({
   target: Omit<DraftCommentInput, "body">;
   addLabel: string;
   className?: string;
-  /** It's markdown, which can be previewed; as a PR description, newlines are line breaks. */
-  markdown?: boolean;
+  /**
+   * It's markdown, which can be read rendered: `text` (e.g. the plan without its frontmatter),
+   * with `breaks` when newlines are line breaks (a PR description, not a `.md` file).
+   */
+  preview?: { text: string; breaks: boolean };
 }) {
   const review = useReview();
   const picker = useLinePicker<"text">();
   // Lines while it takes comments, which go on lines; rendered once it's just for reading.
-  const [preview, setPreview] = useState(markdown && !review.canReview);
+  const [preview, setPreview] = useState(rendered !== undefined && !review.canReview);
   const lines = text.replace(/\n$/, "").split("\n");
 
   const items: Item[] = [
@@ -76,7 +79,7 @@ export function TextLines({
       />
     );
   };
-  const toggle = markdown && (
+  const toggle = rendered && (
     <fieldset className="segmented text-view" aria-label="How to show it">
       {(["Lines", "Preview"] as const).map((label) => {
         const chosen = (label === "Preview") === preview;
@@ -95,11 +98,11 @@ export function TextLines({
     </fieldset>
   );
 
-  if (preview) {
+  if (preview && rendered) {
     return (
       <>
         {toggle}
-        <Markdown text={text} breaks className="text-preview" />
+        <Markdown text={rendered.text} breaks={rendered.breaks} className="text-preview" />
         {items.length > 0 && (
           <div className="thread-list">
             {items.map((item) => render(item, linesOf(item) !== null))}

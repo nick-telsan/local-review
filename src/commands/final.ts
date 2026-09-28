@@ -306,6 +306,10 @@ export async function finalRoundCreate(ctx: Context): Promise<number> {
     slug,
     round,
     phases: s.phases,
+    plan: {
+      version: s.round.planVersion,
+      text: await ctx.planText(slug, ctx.store.getPlanVersion(slug, s.round.planVersion)!),
+    },
   });
 
   const addressed = threads.filter((t) => t.status === "addressed").map((t) => `#${t.id}`);

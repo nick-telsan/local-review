@@ -83,6 +83,7 @@ export async function reviewCreate(
     slug: feature.slug,
     round,
     phases: plan.phases,
+    plan: { version: plan.version, text: await ctx.planText(feature.slug, plan) },
   });
 
   const patchDir = join(ctx.featureDir(feature.slug), "rounds", String(round.n), "patches");

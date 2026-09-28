@@ -156,7 +156,13 @@ export type Anchor =
       lines: [number, number] | null;
       snippet: string[];
     }
-  | { kind: "pr_body"; lines: [number, number] | null; snippet: string[] };
+  | { kind: "pr_body"; lines: [number, number] | null; snippet: string[] }
+  | {
+      kind: "plan"; // the plan file, frontmatter included, as of plan version `version`
+      version: number;
+      lines: [number, number] | null;
+      snippet: string[];
+    };
 
 export type Severity = "blocking" | "suggestion" | "nit" | "question";
 

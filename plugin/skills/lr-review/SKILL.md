@@ -101,6 +101,7 @@ EOF
     { "change": "vtzq", "message": true, "lines": 1, "severity": "nit",
       "body": "Imperative subject: \"Rotate tokens on use\"." },
     { "phase": 2, "severity": "blocking", "body": "done_when says reuse revokes the family; nothing does that yet." },
+    { "plan": true, "lines": 14, "severity": "question", "body": "Task 2.3 has no change naming it: dropped?" },
     { "path": "src/auth.ts", "lines": 12, "side": "old", "severity": "question",
       "body": "Why was this check removed?" },
     { "body": "Consider a feature flag for the rotation." }
@@ -119,6 +120,9 @@ Where a comment lands:
 - **A commit message:** `change` plus `"message": true`, optionally with `lines` within the
   message.
 - **A whole change, a phase, or the feature:** `change`, `phase`, or neither, with no `path`.
+- **The plan:** `"plan": true`, optionally with `lines`, counted from the top of the plan file,
+  frontmatter included (`lr plan show --json` gives its `path`). Use it for the plan's own
+  reasoning; a phase that isn't met is a `phase` comment.
 - `severity` is `blocking` (must fix before approval), `suggestion`, `nit`, or `question`.
 - `suggestion` is exact replacement text for the commented lines. It needs `lines`.
 

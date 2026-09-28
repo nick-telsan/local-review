@@ -71,7 +71,8 @@ export type Placement =
   | { on: "aside"; changeId: string }
   | { on: "gone" }
   | { on: "final"; groupId: string; lines: [number, number] | null }
-  | { on: "pr_body"; lines: [number, number] | null };
+  | { on: "pr_body"; lines: [number, number] | null }
+  | { on: "plan"; lines: [number, number] | null };
 
 export interface ThreadView extends Thread {
   placement: Placement;
@@ -92,6 +93,8 @@ export interface DraftCommentInput {
   final?: string;
   /** The PR body (final rounds). */
   pr_body?: boolean;
+  /** The plan the round was taken against. */
+  plan?: boolean;
   severity?: Severity | null;
   body: string;
   suggestion?: string | null;
@@ -541,6 +544,8 @@ export function place(t: Pick<Thread, "anchor" | "anchorState">, round: Round): 
       return { on: "final", groupId: a.groupId, lines: a.lines };
     case "pr_body":
       return { on: "pr_body", lines: a.lines };
+    case "plan":
+      return { on: "plan", lines: a.lines };
     case "code": {
       // Inline only in the diff it was made in: the change's own, parent to change.
       const i = round.changes.findIndex((c) => c.changeId === a.changeId);

@@ -42,7 +42,7 @@ describe("plugin", () => {
     );
     const reviews = examples.map((f) => parseSubmission(JSON.parse(f.body)));
     expect(reviews.map((r) => [r.verdict, r.comments.length])).toEqual([
-      ["changes_requested", 5],
+      ["changes_requested", 6],
       ["changes_requested", 3],
     ]);
     expect(reviews[1]!.comments.map((c) => [c.final, c.prBody])).toEqual([

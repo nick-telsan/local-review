@@ -249,7 +249,9 @@ describe("Reanchorer", () => {
       ),
     };
     const { phases } = parsePlan(TWO_PHASE_PLAN, "feat");
-    const placement = await new Reanchorer(new Jj(repo.root), round, phases).place(t1, gone);
+    const plan = { version: 1, text: TWO_PHASE_PLAN };
+    const reanchorer = new Reanchorer(new Jj(repo.root), round, phases, plan);
+    const placement = await reanchorer.place(t1, gone);
     expect(placement).toMatchObject({ anchorState: "current", anchor: { lines: [6, 6] } });
   });
 });

@@ -118,6 +118,8 @@ function groupThreads(
   if (finals.length) sections.push({ title: "Final commit messages", depth: 2, threads: finals });
   const prBody = take((a) => a.kind === "pr_body");
   if (prBody.length) sections.push({ title: "PR body", depth: 2, threads: prBody });
+  const plan = take((a) => a.kind === "plan");
+  if (plan.length) sections.push({ title: "The plan", depth: 2, threads: plan });
 
   const changeSections = (phaseId: number | null) =>
     changes
@@ -157,7 +159,16 @@ function groupThreads(
 
 /** Change-level comments first, then the message, then code by file and line. */
 function byLocation(a: Thread, b: Thread): number {
-  const rank = { feature: 0, phase: 0, change: 0, message: 1, final: 1, pr_body: 1, code: 2 };
+  const rank = {
+    feature: 0,
+    phase: 0,
+    change: 0,
+    message: 1,
+    final: 1,
+    pr_body: 1,
+    plan: 1,
+    code: 2,
+  };
   const ra = rank[a.anchor.kind];
   const rb = rank[b.anchor.kind];
   if (ra !== rb) return ra - rb;
@@ -262,7 +273,9 @@ function renderThread(t: Thread, depth: number): string[] {
           ? `final commit ${a.groupId}${lineRef(a.lines)}`
           : a.kind === "pr_body"
             ? `PR body${lineRef(a.lines)}`
-            : null;
+            : a.kind === "plan"
+              ? `plan v${a.version}${lineRef(a.lines)}`
+              : null;
   const outdated = t.anchorState === "outdated";
   const title = [
     `#${t.id}`,
@@ -274,7 +287,8 @@ function renderThread(t: Thread, depth: number): string[] {
     .join(" · ");
   const out = [`${"#".repeat(Math.min(depth, 6))} ${title}`, ""];
 
-  const hasText = a.kind === "message" || a.kind === "final" || a.kind === "pr_body";
+  const hasText =
+    a.kind === "message" || a.kind === "final" || a.kind === "pr_body" || a.kind === "plan";
   if (outdated && (a.kind === "code" || hasText)) {
     const since = t.anchorRound === null ? "the note was written" : `round ${t.anchorRound}`;
     out.push(`_This changed after ${since}. As it was then:_`, "");

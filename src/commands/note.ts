@@ -62,6 +62,7 @@ export async function note(
     message: false,
     final: null,
     prBody: false,
+    plan: false,
     severity: null,
     body,
     suggestion: null,

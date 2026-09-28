@@ -466,6 +466,14 @@ describe("the plan", () => {
     // The earlier round keeps the plan it was taken against.
     expect((await json<PlanView>("/features/feat/rounds/1/plan")).version).toBe(1);
   });
+
+  test("comments on the plan's lines are drafted against the round's version", async () => {
+    const path = "/features/feat/rounds/1/draft/comments";
+    const ok = await send<ReviewDraft>("POST", path, { plan: true, lines: [15, 15], body: "?" });
+    expect(ok.data.comments[0]!.placement).toEqual({ on: "plan", lines: [15, 15] });
+    const bad = await send("POST", path, { plan: true, lines: [16, 16], body: "?" });
+    expect(bad.data.error).toBe("lines 16-16 are past the end of plan v1 (15 lines)");
+  });
 });
 
 describe("a final round", () => {
