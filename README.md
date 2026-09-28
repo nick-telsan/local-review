@@ -53,6 +53,7 @@ lr final pr-body -F pr.md          # …and the PR body (or edit the files lr fi
 lr review create --final           # review the messages and PR body; approve with review submit
 lr final apply                     # squash the stack exactly as approved (undo: jj op restore)
 lr feature clean                   # once it lands: forget finished features' bookmarks
+lr repo relink                     # after moving the repo: bring its review history along
 ```
 
 Every command takes `--json`. Actors are `--as human:<name>` or `--as agent:<name>` (or

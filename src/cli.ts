@@ -13,6 +13,7 @@ import { HOOK_EVENTS, hook } from "./commands/hook.ts";
 import { note } from "./commands/note.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
 import { rebase } from "./commands/rebase.ts";
+import { repoRelink } from "./commands/repo.ts";
 import { reviewCreate } from "./commands/review.ts";
 import { status } from "./commands/status.ts";
 import { reviewSubmit } from "./commands/submit.ts";
@@ -48,6 +49,7 @@ Usage:
   lr final apply                  squash the stack as approved in the final round
   lr rebase [--onto <revset>]     rebase the stack onto its base (--onto: a new base)
   lr status
+  lr repo relink [<old path>]    bring review history along after the repo moved
   lr hook ${HOOK_EVENTS.join("|")}
                                   Claude Code hook handlers (hook JSON on stdin)
 
@@ -198,7 +200,7 @@ const COMMANDS: Record<string, Handler> = {
 };
 
 /** Every command, as typed after `lr` (skills are tested against this list). */
-export const COMMAND_NAMES = [...Object.keys(COMMANDS), "hook"];
+export const COMMAND_NAMES = [...Object.keys(COMMANDS), "hook", "repo relink"];
 
 const FILE = { file: { type: "string", short: "F" } } as const;
 
@@ -226,6 +228,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const name = [argv.slice(0, 2).join(" "), argv[0] ?? ""].find((n) => n in COMMANDS);
   const wantsHelp =
     argv.length === 0 || argv.includes("--help") || argv.includes("-h") || argv[0] === "help";
+  // Relinking moves lr's state for this repo into place, so it mustn't open (and create) it first.
+  if (argv[0] === "repo" && argv[1] === "relink" && !wantsHelp) {
+    return guarded(io, async () => {
+      const { values, positionals } = parse(argv.slice(2), {});
+      return repoRelink(io, positionals[0], values);
+    });
+  }
   if (!name || wantsHelp) {
     if (!wantsHelp) io.err(`error: unknown command: ${argv.join(" ")}\n`);
     io.out(USAGE);

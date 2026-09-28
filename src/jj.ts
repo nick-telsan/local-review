@@ -188,6 +188,14 @@ export class Jj {
     if (names.length) await this.run(["bookmark", "forget", ...names.map((n) => `exact:${n}`)]);
   }
 
+  /** Which of `ids` (commit ids) this repo has. */
+  async presentCommits(ids: string[]): Promise<string[]> {
+    if (!ids.length) return [];
+    const revset = ids.map((id) => `present(${id})`).join(" | ");
+    const out = await this.run(["log", "--no-graph", "-r", revset, "-T", 'commit_id ++ "\n"']);
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+
   async workspaceNames(): Promise<string[]> {
     const out = await this.run(["workspace", "list", "-T", 'name ++ "\n"']);
     return out.split("\n").filter((l) => l.length > 0);

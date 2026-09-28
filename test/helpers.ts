@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -24,6 +24,21 @@ export class TestRepo {
     const root = join(tmp, "repo");
     await run(["jj", "git", "init", root], tmp);
     return new TestRepo(tmp, root);
+  }
+
+  /** Move the repo to `<tmp>/<name>`, as a developer moving its directory would. */
+  moveTo(name: string): TestRepo {
+    const root = join(this.tmp, name);
+    mkdirSync(dirname(root), { recursive: true });
+    renameSync(this.root, root);
+    return new TestRepo(this.tmp, root);
+  }
+
+  /** Another repo in the same temp dir (sharing jj config and local-review home). */
+  async sibling(name: string): Promise<TestRepo> {
+    const root = join(this.tmp, name);
+    await run(["jj", "git", "init", root], this.tmp);
+    return new TestRepo(this.tmp, root);
   }
 
   cleanup(): void {

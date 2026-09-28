@@ -53,8 +53,8 @@ desktop app can all write during the same round. SQLite transactions make that s
 inventing locking. Anything a person or agent writes as prose (plans, PR body) stays a plain file.
 Logs and patches stay plain files too.
 
-The repo key is a hash of the root path, so moving a repo breaks the link. `lr repo relink <path>`
-repairs it: it updates `repo.json` and renames the key directory.
+The repo key is a hash of the root path, so moving a repo breaks the link: lr finds no history at
+the new path. `lr repo relink [<old path>]`, run in the moved repo, repairs it (see CLI).
 
 **Why cache patches.** Each round records the jj operation id, so `jj --at-op` can reconstruct it.
 But `jj op abandon` / `jj util gc` can drop old commits, and patches are cheap insurance for
@@ -661,7 +661,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr hook session-start\|pre-tool-use\|stop`                              | Claude Code    | hook handlers; see Claude Code integration                                    |
 | `lr feature abandon [<slug>]`                                            | human          | give up on a feature (history and commits are kept)                           |
 | `lr feature clean [<slug>…] [--purge]`                                   | anyone; `--purge`: human | tidy up after finished features (see below)                         |
-| `lr repo relink <path>`                                                  | developer      | repair the repo key after the repo moves                                      |
+| `lr repo relink [<old path>]`                                            | developer      | bring review history along after the repo moves (see below)                   |
 
 `lr feature clean` tidies up after done and abandoned features: the ones named, or all of them. It
 refuses a feature that's still active.
@@ -679,6 +679,16 @@ refuses a feature that's still active.
   there's no undo.
 
 It prints the jj operation to restore to undo the bookmark and workspace changes.
+
+`lr repo relink` moves a repo's review history to where the repo is now. Without a path, it looks
+for history whose repo is gone and whose latest rounds recorded commits this repo has; it relinks
+the one match, and otherwise asks for the old path. Given a path, it refuses one that's still a jj
+repo (a copy isn't a move), or whose rounds recorded none of this repo's commits. It renames the
+key directory, points `repo.json` and the check log paths at the new place, and replaces the empty
+state that any lr command run here before relinking left behind. It won't merge two histories.
+Checks workspaces find their repo by a relative path, which the move broke, so relink forgets them
+and removes their directories; the next check run makes new ones. Until the repo is relinked,
+commands that find no features here say so when history for a gone repo of the same name exists.
 
 ### Claude Code integration
 
@@ -712,7 +722,8 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
   are reading.
 - **An approval covers each change's own diff, not its commit id,** so a clean rebase keeps it. The
   checks run again on the rebased commits before anything is finalized.
-- **Repo moves:** `lr repo relink`.
+- **Repo moves:** `lr repo relink`, rather than a repo id stored in the repo. lr keeps nothing in
+  the working copy, and matching on recorded commits finds the history without one.
 - **Notes are anchored to the live stack,** because they're written mid-phase, before any round.
   They're re-anchored at every `lr review create`, resolved or not.
 - **Replying to a note reopens it** (unless you wrote it). A question is the common case, and one

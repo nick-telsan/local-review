@@ -5,6 +5,7 @@ import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
 import { revsetString } from "../jj.ts";
 import type { Feature } from "../model.ts";
+import { movedHint } from "../paths.ts";
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -37,7 +38,7 @@ export async function featureList(ctx: Context): Promise<number> {
   ctx.print(
     { features },
     features.length === 0
-      ? "No features yet."
+      ? `No features yet${movedHint(ctx.jj.root)}.`
       : features.map(
           (f) =>
             `${f.slug.padEnd(24)} ${f.status.padEnd(13)} plan v${f.currentPlanVersion ?? "-"}  ${f.title}`,

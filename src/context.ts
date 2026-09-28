@@ -3,7 +3,7 @@ import { LrError } from "./errors.ts";
 import { readInput } from "./io.ts";
 import { Jj } from "./jj.ts";
 import type { Actor, Feature, PlanVersion, Round } from "./model.ts";
-import { featureDir } from "./paths.ts";
+import { featureDir, movedHint } from "./paths.ts";
 import { Store } from "./store.ts";
 
 export interface GlobalOptions {
@@ -73,7 +73,7 @@ export class Context {
         "no active feature; start one with `lr feature start <slug>`" +
           (finished.length
             ? `, or pick a finished one with --feature: ${finished.join(", ")}`
-            : ""),
+            : movedHint(this.jj.root)),
       );
     }
     throw new LrError(

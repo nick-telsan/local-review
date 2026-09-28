@@ -503,6 +503,16 @@ export class Store {
       );
   }
 
+  /** Point check logs recorded under `fromDir` at the same files under `toDir`. */
+  relocateLogs(fromDir: string, toDir: string): void {
+    this.db
+      .query(
+        `UPDATE check_runs SET log_path = $to || substr(log_path, length($from) + 1)
+         WHERE substr(log_path, 1, length($from) + 1) = $from || '/'`,
+      )
+      .run({ from: fromDir, to: toDir });
+  }
+
   updateCheckRun(
     id: string,
     u: { status: CheckStatus; exitCode?: number | null; startedAt?: string; finishedAt?: string },
