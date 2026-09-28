@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DraftComment, DraftCommentInput } from "../ui/api.ts";
 import { CommentForm } from "./CommentForm.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { useReview } from "./review.tsx";
 import { Pill } from "./ui.tsx";
 
@@ -8,8 +9,11 @@ import { Pill } from "./ui.tsx";
 export function DraftCard({
   draft,
   suggestFrom = null,
+  where,
 }: {
   draft: DraftComment;
+  /** Where it points, for a draft not shown at its lines. */
+  where?: string;
   /** Its lines' text, when it's on lines of the new code the diff shows. */
   suggestFrom?: string | null;
 }) {
@@ -42,6 +46,7 @@ export function DraftCard({
       <header className="thread-head">
         <Pill kind="draft">draft</Pill>
         {c.severity && <Pill kind={c.severity}>{c.severity}</Pill>}
+        {where && <span className="muted mono">{where}</span>}
         <span className="spacer" />
         {review.canReview && (
           <>
@@ -59,7 +64,7 @@ export function DraftCard({
         )}
       </header>
       <div className="entry">
-        <div className="body">{c.body}</div>
+        <Markdown text={c.body} breaks className="body" />
         {c.suggestion != null && (
           <figure className="suggestion">
             <figcaption>Suggested change</figcaption>

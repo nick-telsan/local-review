@@ -3,6 +3,7 @@ import type { ReplyAction } from "../commands/thread.ts";
 import type { Anchor, Entry } from "../model.ts";
 import type { ThreadView } from "../ui/api.ts";
 import { ApiError, send } from "./api.ts";
+import { Markdown } from "./Markdown.tsx";
 import { useReview } from "./review.tsx";
 import { ActorName, Pill, short, Time } from "./ui.tsx";
 
@@ -183,7 +184,7 @@ function EntryView({ entry: e }: { entry: Entry }) {
           {e.round !== null && ` · round ${e.round}`}
         </span>
       </div>
-      {e.body && <div className="body">{e.body}</div>}
+      {e.body && <Markdown text={e.body} breaks className="body" />}
       {e.suggestion !== null && (
         <figure className="suggestion">
           <figcaption>Suggested change</figcaption>

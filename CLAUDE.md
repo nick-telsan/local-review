@@ -26,7 +26,7 @@ the why isn't obvious.
 bypass either (no `--minimum-release-age=0`, no `^` ranges). Avoid runtime dependencies:
 `bun:sqlite`, `Bun.YAML`, `Bun.TOML`, `Bun.spawn`, and `node:util` `parseArgs` cover what we
 need so far. The exceptions are React (`react`, `react-dom`) and markdown rendering
-(`react-markdown`, `remark-gfm`), which only the web UI uses and which are bundled into the page.
+(`react-markdown`, `remark-gfm`, `remark-breaks`), which only the web UI uses and which are bundled into the page.
 
 ## Code conventions
 

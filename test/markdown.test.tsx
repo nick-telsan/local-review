@@ -43,3 +43,13 @@ test("an agent's text can't run script or load anything", () => {
   expect(out).toContain('<a href="https://tracker.example/pixel.png"');
   expect(out).toContain("🖼 chart</a>");
 });
+
+test("in comments and the PR body, each newline is a line break, as on GitHub", () => {
+  const text = "Two things:\nfirst\nsecond";
+  expect(renderToStaticMarkup(<Markdown text={text} />)).toContain(
+    "<p>Two things:\nfirst\nsecond</p>",
+  );
+  expect(renderToStaticMarkup(<Markdown text={text} breaks className="body" />)).toBe(
+    '<div class="markdown body"><p>Two things:<br/>\nfirst<br/>\nsecond</p></div>',
+  );
+});

@@ -3,6 +3,7 @@ import type { PlanView, RoundView, ThreadView } from "../ui/api.ts";
 import { send, useApi } from "./api.ts";
 import { ChangePane } from "./ChangePane.tsx";
 import { AddComment, DraftList } from "./Draft.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { PlanPane, planPath } from "./PlanPane.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { draftsOn, makeReview, ReviewContext, useReview } from "./review.tsx";
@@ -349,7 +350,7 @@ function Overview({ view, base }: { view: RoundView; base: string }) {
                     <Time iso={r.submittedAt ?? r.createdAt} />
                   </span>
                 </div>
-                {r.body && <div className="body">{r.body}</div>}
+                {r.body && <Markdown text={r.body} breaks className="body" />}
               </li>
             ))}
           </ul>
@@ -457,6 +458,7 @@ function FinalRound({ view }: { view: RoundView }) {
           drafts={draftsOn(review.drafts, "pr_body")}
           target={{ pr_body: true }}
           addLabel="Comment on the whole PR body"
+          markdown
         />
       </section>
     </>

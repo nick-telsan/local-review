@@ -1,7 +1,8 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import type { DraftComment, DraftCommentInput, ThreadView } from "../ui/api.ts";
 import { CommentForm } from "./CommentForm.tsx";
 import { AddComment, DraftCard } from "./Draft.tsx";
+import { Markdown } from "./Markdown.tsx";
 import { useLinePicker } from "./picker.ts";
 import { useReview } from "./review.tsx";
 import { ThreadCard } from "./Thread.tsx";
@@ -13,9 +14,12 @@ const linesOf = (i: Item): [number, number] | null => {
   return "lines" in p ? p.lines : null;
 };
 
+const range = ([a, b]: [number, number]) => (a === b ? `line ${a}` : `lines ${a}–${b}`);
+
 /**
  * A text reviewed line by line: a commit message, a final commit's message, or the PR body.
- * Comments on lines show after the last one; comments on the whole text, below it.
+ * Comments on lines show after the last one; comments on the whole text, below it. Markdown (the
+ * PR body) can also be read rendered, with every comment below it.
  */
 export function TextLines({
   text,
@@ -24,6 +28,7 @@ export function TextLines({
   target,
   addLabel,
   className,
+  markdown = false,
 }: {
   text: string;
   threads: ThreadView[];
@@ -32,9 +37,13 @@ export function TextLines({
   target: Omit<DraftCommentInput, "body">;
   addLabel: string;
   className?: string;
+  /** It's markdown, which can be previewed; as a PR description, newlines are line breaks. */
+  markdown?: boolean;
 }) {
   const review = useReview();
   const picker = useLinePicker<"text">();
+  // Lines while it takes comments, which go on lines; rendered once it's just for reading.
+  const [preview, setPreview] = useState(markdown && !review.canReview);
   const lines = text.replace(/\n$/, "").split("\n");
 
   const items: Item[] = [
@@ -54,12 +63,52 @@ export function TextLines({
   const below = items.filter((i) => !inline(i));
   const textOf = ([a, b]: [number, number]) => lines.slice(a - 1, b).join("\n");
 
-  const render = (i: Item, showAnchor = false): ReactNode =>
-    i.kind === "thread" ? (
+  const render = (i: Item, showAnchor = false): ReactNode => {
+    const at = linesOf(i);
+    return i.kind === "thread" ? (
       <ThreadCard key={`t${i.thread.id}`} thread={i.thread} showAnchor={showAnchor} />
     ) : (
-      <DraftCard key={i.draft.id} draft={i.draft} suggestFrom={linesOf(i) && textOf(linesOf(i)!)} />
+      <DraftCard
+        key={i.draft.id}
+        draft={i.draft}
+        suggestFrom={at && textOf(at)}
+        where={showAnchor && at ? range(at) : undefined}
+      />
     );
+  };
+  const toggle = markdown && (
+    <fieldset className="segmented text-view" aria-label="How to show it">
+      {(["Lines", "Preview"] as const).map((label) => {
+        const chosen = (label === "Preview") === preview;
+        return (
+          <button
+            key={label}
+            type="button"
+            className={chosen ? "chosen" : undefined}
+            aria-pressed={chosen}
+            onClick={() => setPreview(label === "Preview")}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </fieldset>
+  );
+
+  if (preview) {
+    return (
+      <>
+        {toggle}
+        <Markdown text={text} breaks className="text-preview" />
+        {items.length > 0 && (
+          <div className="thread-list">
+            {items.map((item) => render(item, linesOf(item) !== null))}
+          </div>
+        )}
+        <AddComment label={addLabel} target={target} />
+      </>
+    );
+  }
   const pending = picker.open;
   const commented = (n: number) =>
     items.some((i) => {
@@ -69,6 +118,7 @@ export function TextLines({
 
   return (
     <>
+      {toggle}
       <table className={`diff text-lines ${className ?? ""}`}>
         <colgroup>
           <col className="num-col" />

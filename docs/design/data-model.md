@@ -829,6 +829,11 @@ nothing is fetched until someone clicks. Other versions can be read,
 each with a line diff from the one before, but only the round's version shows coverage or takes
 comments, since those are on the round's phases.
 
+**Markdown.** Comments, replies, review summaries, and the PR body's preview render as markdown
+like the plan, with each newline a line break, as GitHub treats comments and PR descriptions. The
+PR body shows as numbered lines while its round takes comments (they go on lines), and rendered
+otherwise; a toggle switches. Suggestions and commit messages stay plain text.
+
 **Since an earlier round.** A round can show only what changed since an earlier one: by default
 the last round the actor reviewed (the round view's `lastReviewed`), else the one before. It's
 `?since=<n>` in the address, and off unless asked for. The sidebar marks each change changed, new,
