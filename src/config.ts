@@ -8,6 +8,8 @@ export interface CheckConfig {
   run: string;
   at: CheckTarget;
   timeoutMs: number;
+  /** After SIGTERM (a timeout, or processes left running), how long before SIGKILL. */
+  killAfterMs: number;
 }
 
 export interface ReviewConfig {
@@ -25,6 +27,7 @@ export interface FinalConfig {
 export interface RepoConfig {
   /** Runs in the check workspace before checks at each commit (e.g. `bun install`). */
   setup: string | null;
+  setupKillAfterMs: number;
   checks: CheckConfig[];
   review: ReviewConfig;
   final: FinalConfig;
@@ -35,6 +38,8 @@ const GITHUB_PR_TEMPLATE = ".github/pull_request_template.md";
 
 export const CONFIG_FILE = ".local-review.toml";
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+/** Long enough for a test suite to tear down what it started (containers, databases). */
+const DEFAULT_KILL_AFTER_MS = 30_000;
 
 export async function loadRepoConfig(root: string): Promise<RepoConfig> {
   const file = Bun.file(join(root, CONFIG_FILE));
@@ -42,7 +47,15 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
     ? GITHUB_PR_TEMPLATE
     : null;
   const final: FinalConfig = { commitGuidelines: null, prTemplate: defaultTemplate };
-  if (!(await file.exists())) return { setup: null, checks: [], review: DEFAULT_REVIEW, final };
+  if (!(await file.exists())) {
+    return {
+      setup: null,
+      setupKillAfterMs: DEFAULT_KILL_AFTER_MS,
+      checks: [],
+      review: DEFAULT_REVIEW,
+      final,
+    };
+  }
 
   let data: Record<string, unknown>;
   try {
@@ -54,6 +67,14 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
   const problems: string[] = [];
   const setup = data.setup ?? null;
   if (setup !== null && typeof setup !== "string") problems.push("setup: must be a string");
+  const duration = (value: unknown, where: string, fallback: number): number | null => {
+    if (value === undefined) return fallback;
+    const parsed = typeof value === "string" ? parseDuration(value) : null;
+    if (parsed === null) problems.push(`${where}: expected a duration like "90s" or "10m"`);
+    return parsed;
+  };
+  const setupKillAfterMs =
+    duration(data.setup_kill_after, "setup_kill_after", DEFAULT_KILL_AFTER_MS) ?? 0;
 
   const checks: CheckConfig[] = [];
   const names = new Set<string>();
@@ -78,16 +99,10 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
         problems.push(`${where}.at: must be "tip", "bookmarks", or "changes"`);
         return;
       }
-      let timeoutMs = DEFAULT_TIMEOUT_MS;
-      if (raw.timeout !== undefined) {
-        const parsed = typeof raw.timeout === "string" ? parseDuration(raw.timeout) : null;
-        if (parsed === null) {
-          problems.push(`${where}.timeout: expected a duration like "90s" or "10m"`);
-          return;
-        }
-        timeoutMs = parsed;
-      }
-      checks.push({ name: raw.name, run: raw.run, at, timeoutMs });
+      const timeoutMs = duration(raw.timeout, `${where}.timeout`, DEFAULT_TIMEOUT_MS);
+      const killAfterMs = duration(raw.kill_after, `${where}.kill_after`, DEFAULT_KILL_AFTER_MS);
+      if (timeoutMs === null || killAfterMs === null) return;
+      checks.push({ name: raw.name, run: raw.run, at, timeoutMs, killAfterMs });
     });
   }
 
@@ -127,7 +142,7 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
   if (problems.length > 0) {
     throw new LrError(`${CONFIG_FILE}:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
   }
-  return { setup: setup as string | null, checks, review, final };
+  return { setup: setup as string | null, setupKillAfterMs, checks, review, final };
 }
 
 export function parseDuration(text: string): number | null {
@@ -135,4 +150,16 @@ export function parseDuration(text: string): number | null {
   if (!m) return null;
   const unit = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[m[2] as "ms" | "s" | "m" | "h"];
   return Number(m[1]) * unit;
+}
+
+/** The inverse of `parseDuration`, in the largest unit that fits: `90s`, `10m`, `300ms`. */
+export function formatDuration(ms: number): string {
+  for (const [unit, size] of [
+    ["h", 3_600_000],
+    ["m", 60_000],
+    ["s", 1000],
+  ] as const) {
+    if (ms >= size && ms % size === 0) return `${ms / size}${unit}`;
+  }
+  return `${ms}ms`;
 }

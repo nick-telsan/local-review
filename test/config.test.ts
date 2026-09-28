@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_FILE, loadRepoConfig, parseDuration } from "../src/config.ts";
+import { CONFIG_FILE, formatDuration, loadRepoConfig, parseDuration } from "../src/config.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -19,6 +19,7 @@ describe("loadRepoConfig", () => {
   test("defaults when there's no config file", async () => {
     expect(await loadRepoConfig(dir)).toEqual({
       setup: null,
+      setupKillAfterMs: 30_000,
       checks: [],
       review: { triageAgentComments: false },
       final: { commitGuidelines: null, prTemplate: null },
@@ -28,12 +29,14 @@ describe("loadRepoConfig", () => {
   test("parses setup and checks with defaults", async () => {
     const config = await load(`
 setup = "bun install"
+setup_kill_after = "1m"
 
 [[checks]]
 name = "test"
 run = "bun test"
 at = "bookmarks"
 timeout = "90s"
+kill_after = "2m"
 
 [[checks]]
 name = "lint"
@@ -41,9 +44,16 @@ run = "bun run lint"
 `);
     expect(config).toEqual({
       setup: "bun install",
+      setupKillAfterMs: 60_000,
       checks: [
-        { name: "test", run: "bun test", at: "bookmarks", timeoutMs: 90_000 },
-        { name: "lint", run: "bun run lint", at: "tip", timeoutMs: 600_000 },
+        {
+          name: "test",
+          run: "bun test",
+          at: "bookmarks",
+          timeoutMs: 90_000,
+          killAfterMs: 120_000,
+        },
+        { name: "lint", run: "bun run lint", at: "tip", timeoutMs: 600_000, killAfterMs: 30_000 },
       ],
       review: { triageAgentComments: false },
       final: { commitGuidelines: null, prTemplate: null },
@@ -53,6 +63,7 @@ run = "bun run lint"
   test("reports every problem at once", async () => {
     const message = await load(`
 setup = 3
+setup_kill_after = 30
 
 [[checks]]
 run = "x"
@@ -69,6 +80,7 @@ at = "sometimes"
 name = "c"
 run = "x"
 timeout = "soon"
+kill_after = "later"
 
 [[checks]]
 name = "c"
@@ -78,7 +90,9 @@ run = "x"
     expect(message).toContain("checks[0].name: required");
     expect(message).toContain("checks[1].run: required");
     expect(message).toContain('checks[2].at: must be "tip", "bookmarks", or "changes"');
+    expect(message).toContain('setup_kill_after: expected a duration like "90s" or "10m"');
     expect(message).toContain("checks[3].timeout");
+    expect(message).toContain("checks[3].kill_after");
     expect(message).toContain('checks[4].name: duplicate check "c"');
   });
 
@@ -117,4 +131,10 @@ test("parseDuration", () => {
   expect(parseDuration("250ms")).toBe(250);
   expect(parseDuration("1h")).toBe(3_600_000);
   expect(parseDuration("10 minutes")).toBeNull();
+});
+
+test("formatDuration", () => {
+  expect(
+    ["90s", "10m", "250ms", "1h", "1500ms"].map((d) => formatDuration(parseDuration(d)!)),
+  ).toEqual(["90s", "10m", "250ms", "1h", "1500ms"]);
 });

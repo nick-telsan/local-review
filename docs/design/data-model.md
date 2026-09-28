@@ -221,12 +221,14 @@ Defined in `<repo>/.local-review.toml`:
 
 ```toml
 setup = "bun install --frozen-lockfile"   # optional; runs once per commit before its checks
+setup_kill_after = "30s"                  # default 30s; like kill_after, for setup
 
 [[checks]]
 name = "test"
 run = "bun test"
 at = "bookmarks"        # "tip" (default) | "bookmarks" | "changes"
 timeout = "10m"         # default 10m
+kill_after = "30s"      # default 30s: time to shut down after SIGTERM, before SIGKILL
 ```
 
 ```ts
@@ -260,12 +262,20 @@ If a check fails, or a change is conflicted (conflicts propagate to descendants)
 opened. The runs are still recorded, so their logs are available for the fix.
 
 Each check (and setup) runs in its own process group, so stopping it stops everything it started,
-not just the shell. A check past its timeout gets SIGTERM, then SIGKILL 5 seconds later; the run is
-an `error`. Anything a check leaves running after it exits (a background server, say) is stopped
-the same way, without changing its result, so nothing touches the workspace after lr moves on. The
-group isn't in the terminal's foreground group, so lr passes SIGINT, SIGTERM and SIGHUP on to the
-running check; a second one kills it. The run is recorded as an `error`, no round is opened, and lr
-exits as an interrupted shell would (130 for Ctrl-C).
+not just the shell. A check past its timeout gets SIGTERM, then SIGKILL after `kill_after`; the run
+is an `error`. Anything a check leaves running after it exits (a background server, say) is stopped
+the same way, without changing its result, so nothing touches the workspace after lr moves on. If
+it doesn't exit within half a second, lr says it's waiting and for how long.
+
+The 30-second default is for test suites that tear down databases or containers. Those usually
+belong to the Docker daemon, not the check's process group, so only the suite's own teardown can
+stop them, and a SIGKILL mid-teardown leaves them running. Set `kill_after` higher for suites that
+need longer; waiting forever isn't an option, since a hung teardown would hang the round.
+
+The group isn't in the terminal's foreground group, so lr passes SIGINT, SIGTERM and SIGHUP on to
+the running check. A second one, or one while lr is waiting for a check to stop, kills it. The run
+is recorded as an `error`, no round is opened, and lr exits as an interrupted shell would (130 for
+Ctrl-C).
 
 ### Review
 

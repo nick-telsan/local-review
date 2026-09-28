@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type CheckSettings, checkTargets, runChecks, STOP } from "../src/checks.ts";
+import { type CheckSettings, checkTargets, runChecks } from "../src/checks.ts";
 import type { CheckConfig } from "../src/config.ts";
 import { LrError } from "../src/errors.ts";
 import { Jj } from "../src/jj.ts";
@@ -30,6 +30,7 @@ const check = (name: string, at: CheckConfig["at"]): CheckConfig => ({
   run: "true",
   at,
   timeoutMs: 1000,
+  killAfterMs: 1000,
 });
 
 describe("checkTargets", () => {
@@ -83,6 +84,12 @@ describe("runChecks", () => {
     repo.cleanup();
   });
 
+  // What lr printed while running checks.
+  let lines: string[] = [];
+  beforeEach(() => {
+    lines = [];
+  });
+
   const run = async (config: CheckSettings) => {
     const jj = new Jj(repo.root);
     const snap = await takeSnapshot(jj, "main", phases);
@@ -95,7 +102,7 @@ describe("runChecks", () => {
       config,
       targets: checkTargets(config.checks, snap.changes, phases),
       trigger: "auto",
-      log: () => {},
+      log: (line) => lines.push(line),
     });
     return { results, featureDir };
   };
@@ -103,12 +110,14 @@ describe("runChecks", () => {
   test("runs in a separate workspace and reuses passing results", async () => {
     const config: CheckSettings = {
       setup: "touch setup-ran",
+      setupKillAfterMs: 1000,
       checks: [
         {
           name: "has-schema",
           run: "test -f schema.sql && touch dirty",
           at: "bookmarks",
           timeoutMs: 5000,
+          killAfterMs: 1000,
         },
       ],
     };
@@ -133,7 +142,8 @@ describe("runChecks", () => {
   test("a changed command isn't served from cache", async () => {
     const pass = (run: string): CheckSettings => ({
       setup: null,
-      checks: [{ name: "c", run, at: "tip", timeoutMs: 5000 }],
+      setupKillAfterMs: 1000,
+      checks: [{ name: "c", run, at: "tip", timeoutMs: 5000, killAfterMs: 1000 }],
     });
     await run(pass("true"));
     const again = await run(pass("true "));
@@ -143,7 +153,8 @@ describe("runChecks", () => {
   test("recreates the workspace if its directory was deleted", async () => {
     const config: CheckSettings = {
       setup: null,
-      checks: [{ name: "c", run: "exit 1", at: "tip", timeoutMs: 5000 }],
+      setupKillAfterMs: 1000,
+      checks: [{ name: "c", run: "exit 1", at: "tip", timeoutMs: 5000, killAfterMs: 1000 }],
     };
     const { featureDir } = await run(config);
     await Bun.$`rm -rf ${join(featureDir, "workspaces")}`;
@@ -154,9 +165,12 @@ describe("runChecks", () => {
   describe("stopping checks", () => {
     // Each command records its process group (its shell's pid), to check nothing outlives it.
     const pgidFile = () => join(repo.tmp, "pgid");
-    const one = (run: string, timeoutMs = 5000): CheckSettings => ({
+    const one = (run: string, timeoutMs = 5000, killAfterMs = 30_000): CheckSettings => ({
       setup: null,
-      checks: [{ name: "c", run: `echo $$ > ${pgidFile()}; ${run}`, at: "tip", timeoutMs }],
+      setupKillAfterMs: 30_000,
+      checks: [
+        { name: "c", run: `echo $$ > ${pgidFile()}; ${run}`, at: "tip", timeoutMs, killAfterMs },
+      ],
     });
     const groupGone = async () => {
       const pgid = Number(await Bun.file(pgidFile()).text());
@@ -164,10 +178,7 @@ describe("runChecks", () => {
     };
     const log = (r: { results: { run: { logPath: string } }[] }) =>
       Bun.file(r.results[0]!.run.logPath).text();
-
-    afterEach(() => {
-      STOP.graceMs = 5000;
-    });
+    const waited = () => lines.filter((l) => l.includes("waiting up to"));
 
     test("a timeout stops everything the check started", async () => {
       const started = Date.now();
@@ -175,12 +186,16 @@ describe("runChecks", () => {
       expect(r.results.map((x) => x.run.status)).toEqual(["error"]);
       expect(await log(r)).toContain("[lr] timed out after 300ms; stopped with SIGTERM");
       expect(Date.now() - started).toBeLessThan(5000);
+      // It exited right away, so there was no wait to mention.
+      expect(waited()).toEqual([]);
       await groupGone();
     });
 
-    test("SIGKILL when the check ignores SIGTERM", async () => {
-      STOP.graceMs = 200;
-      const r = await run(one("trap '' TERM; sleep 30", 200));
+    test("SIGKILL when the check outlasts kill_after, saying what lr is waiting for", async () => {
+      const r = await run(one("trap '' TERM; sleep 30", 200, 800));
+      expect(waited()).toEqual([
+        "  c: timed out after 200ms; waiting up to 800ms for it to stop (Ctrl-C to kill it now)",
+      ]);
       expect(await log(r)).toContain("stopped with SIGKILL");
       await groupGone();
     });
@@ -192,10 +207,24 @@ describe("runChecks", () => {
       await groupGone();
     });
 
-    /** Run checks, and send lr `signals` once the check has started. */
-    async function interrupt(settings: CheckSettings, signals: NodeJS.Signals[]) {
+    test("leftovers that take a while to stop", async () => {
+      const r = await run(one("(trap '' TERM; sleep 30) & true", 5000, 700));
+      expect(r.results.map((x) => x.run.status)).toEqual(["pass"]);
+      expect(waited()).toEqual([
+        "  c: stopping what it left running; waiting up to 700ms for it to stop (Ctrl-C to kill it now)",
+      ]);
+      expect(await log(r)).toContain("[lr] stopped processes it left running (SIGKILL)");
+      await groupGone();
+    });
+
+    /** Run checks, and send lr `signals` once `ready` (by default: once the check started). */
+    async function interrupt(
+      settings: CheckSettings,
+      signals: NodeJS.Signals[],
+      ready = () => existsSync(pgidFile()),
+    ) {
       const running = run(settings).catch((e: unknown) => e);
-      while (!existsSync(pgidFile())) await Bun.sleep(20);
+      while (!ready()) await Bun.sleep(20);
       for (const signal of signals) {
         process.emit(signal, signal);
         await Bun.sleep(100);
@@ -226,9 +255,22 @@ describe("runChecks", () => {
       await groupGone();
     });
 
+    test("Ctrl-C while lr waits for a timed-out check kills it now", async () => {
+      const started = Date.now();
+      const settings = one("trap '' TERM; sleep 30", 200, 30_000);
+      const e = await interrupt(settings, ["SIGINT"], () => waited().length > 0);
+      expect(e.exitCode).toBe(130);
+      expect(Date.now() - started).toBeLessThan(5000);
+      await groupGone();
+    });
+
     test("an interrupted setup stops the round", async () => {
       const e = await interrupt(
-        { setup: `echo $$ > ${pgidFile()}; sleep 30`, checks: [check("c", "tip")] },
+        {
+          setup: `echo $$ > ${pgidFile()}; sleep 30`,
+          setupKillAfterMs: 30_000,
+          checks: [check("c", "tip")],
+        },
         ["SIGTERM"],
       );
       expect(e.exitCode).toBe(143);

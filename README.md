@@ -109,12 +109,14 @@ Define checks in `.local-review.toml` at the repo root:
 
 ```toml
 setup = "bun install --frozen-lockfile"   # optional, runs once per checked commit
+setup_kill_after = "30s"                  # like kill_after, for setup
 
 [[checks]]
 name = "test"
 run = "bun test"
 at = "bookmarks"      # "tip" (default) | "bookmarks" | "changes"
 timeout = "10m"       # default 10m
+kill_after = "30s"    # after a timeout, how long it gets to shut down before SIGKILL
 ```
 
 Checks run in a separate jj workspace, so your working copy is never touched. A passing result
