@@ -1,8 +1,9 @@
-import { Fragment, type MouseEvent, useEffect, useState } from "react";
+import { Fragment, useState } from "react";
 import { type DiffLine, type FileDiff, filePath } from "../patch.ts";
 import type { DraftComment, Placement, ThreadView } from "../ui/api.ts";
 import { CommentForm } from "./CommentForm.tsx";
 import { DraftCard } from "./Draft.tsx";
+import { useLinePicker } from "./picker.ts";
 import { draftsOn, useReview } from "./review.tsx";
 import { ThreadCard } from "./Thread.tsx";
 
@@ -21,18 +22,7 @@ type Item =
   | { kind: "thread"; thread: ThreadView; at: OnLines }
   | { kind: "draft"; draft: DraftComment; at: OnLines };
 
-/** Lines picked for a new comment: `anchor` is where the pick started, `head` where it is now. */
-interface Selection {
-  side: Side;
-  anchor: number;
-  head: number;
-}
-
 const lineOn = (l: DiffLine, side: Side) => (side === "old" ? l.oldLine : l.newLine);
-const range = (s: Selection): [number, number] => [
-  Math.min(s.anchor, s.head),
-  Math.max(s.anchor, s.head),
-];
 
 export function FileDiffView({
   file,
@@ -53,15 +43,7 @@ export function FileDiffView({
   const path = filePath(file);
   const lineCount = file.hunks.reduce((n, h) => n + h.lines.length, 0);
   const [open, setOpen] = useState(lineCount <= COLLAPSE_LINES);
-  const [selection, setSelection] = useState<Selection | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const stop = () => setDragging(false);
-    addEventListener("mouseup", stop);
-    return () => removeEventListener("mouseup", stop);
-  }, [dragging]);
+  const picker = useLinePicker<Side>();
 
   const items: Item[] = [
     ...threads.flatMap((t): Item[] =>
@@ -93,11 +75,6 @@ export function FileDiffView({
     return lines.length === b - a + 1 ? lines.map((l) => l.text).join("\n") : null;
   };
 
-  const pick = (side: Side, n: number, extend: boolean) => {
-    setSelection(
-      extend && selection?.side === side ? { ...selection, head: n } : { side, anchor: n, head: n },
-    );
-  };
   const numberCell = (l: DiffLine, side: Side) => {
     const n = lineOn(l, side);
     if (n === null || !review.canReview || !sides.includes(side)) {
@@ -105,44 +82,25 @@ export function FileDiffView({
     }
     return (
       <td className="num">
-        <button
-          type="button"
-          className="num-button"
-          title="Comment on this line (drag or shift-click for several)"
-          onMouseDown={(e: MouseEvent) => {
-            if (e.button !== 0) return;
-            e.preventDefault(); // no text selection while dragging
-            pick(side, n, e.shiftKey);
-            setDragging(true);
-          }}
-          onMouseEnter={() => {
-            if (dragging && selection?.side === side) setSelection({ ...selection, head: n });
-          }}
-          // Keyboard activation (a mouse click was handled on mousedown).
-          onClick={(e) => e.detail === 0 && pick(side, n, e.shiftKey)}
-        >
+        <button type="button" className="num-button" {...picker.button(side, n)}>
           {n}
         </button>
       </td>
     );
   };
 
-  const picked = selection && range(selection);
-  const isPicked = (l: DiffLine) => {
-    if (!selection || !picked) return false;
-    const n = lineOn(l, selection.side);
-    return n !== null && n >= picked[0] && n <= picked[1];
-  };
+  const pending = picker.open;
+  const isPicked = (l: DiffLine) =>
+    picker.isPicked("old", l.oldLine) || picker.isPicked("new", l.newLine);
   const isCommented = (l: DiffLine) =>
     items.some((i) => {
       if (!sides.includes(i.at.side)) return false;
       const n = lineOn(l, i.at.side);
       return n !== null && n >= i.at.lines[0] && n <= i.at.lines[1];
     });
-  const formAfter =
-    selection && picked && !dragging
-      ? rows.find((l) => lineOn(l, selection.side) === picked[1])
-      : undefined;
+  const formAfter = pending
+    ? rows.find((l) => lineOn(l, pending.side) === pending.lines[1])
+    : undefined;
 
   const renderItem = (item: Item, showAnchor = false) =>
     item.kind === "thread" ? (
@@ -237,27 +195,24 @@ export function FileDiffView({
                             </td>
                           </tr>
                         )}
-                        {formAfter === l && selection && picked && (
+                        {formAfter === l && pending && (
                           <tr className="inline-threads">
                             <td colSpan={3}>
                               <div className="thread draft">
                                 <CommentForm
-                                  key={`${selection.side}:${picked.join("-")}`}
-                                  suggestFrom={textOf(selection.side, picked)}
+                                  {...picker.form(textOf(pending.side, pending.lines))}
                                   submitLabel="Add to review"
                                   onSubmit={async (v) => {
                                     await review.add({
                                       change,
-                                      path: (selection.side === "new"
-                                        ? file.newPath
-                                        : file.oldPath)!,
-                                      lines: picked,
-                                      side: selection.side,
+                                      path: (pending.side === "new" ? file.newPath : file.oldPath)!,
+                                      lines: pending.lines,
+                                      side: pending.side,
                                       ...v,
                                     });
-                                    setSelection(null);
+                                    picker.clear();
                                   }}
-                                  onCancel={() => setSelection(null)}
+                                  onCancel={picker.clear}
                                 />
                               </div>
                             </td>

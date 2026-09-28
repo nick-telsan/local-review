@@ -926,6 +926,35 @@ tr.picked td.code {
   background: var(--accent-soft);
 }
 
+/* Texts reviewed line by line: messages and the PR body */
+
+table.text-lines {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: clip;
+  background: var(--panel);
+}
+table.text-lines tr.line:first-child td {
+  padding-top: 6px;
+}
+table.text-lines td.code {
+  padding-left: 12px;
+}
+table.message-lines tr.line:first-child td.code {
+  font-weight: 700;
+}
+.final-group + .final-group {
+  margin-top: 20px;
+}
+.final-group h3 {
+  margin-bottom: 8px;
+}
+.form-heading {
+  margin: 0;
+  font-size: 12px;
+}
+
 /* Since an earlier round */
 
 .since-bar {

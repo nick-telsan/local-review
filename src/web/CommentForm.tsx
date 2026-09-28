@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useEffect, useState } from "react";
 import type { Severity } from "../model.ts";
 import { ApiError } from "./api.ts";
 
@@ -17,15 +17,21 @@ const SEVERITIES: (Severity | null)[] = [null, "blocking", "suggestion", "nit", 
 export function CommentForm({
   initial,
   suggestFrom = null,
+  heading,
   submitLabel,
   onSubmit,
+  onChange,
   onCancel,
 }: {
   initial?: CommentValues;
+  /** What it's on, e.g. "Lines 3–4". */
+  heading?: string;
   /** The selected lines' text, which a suggestion starts from; null when suggestions don't apply. */
   suggestFrom?: string | null;
   submitLabel: string;
   onSubmit: (values: CommentValues) => Promise<void>;
+  /** Hears each edit, so what's written can outlive the form. */
+  onChange?: (values: CommentValues) => void;
   onCancel: () => void;
 }) {
   const [body, setBody] = useState(initial?.body ?? "");
@@ -33,6 +39,10 @@ export function CommentForm({
   const [suggestion, setSuggestion] = useState<string | null>(initial?.suggestion ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    onChange?.({ body, severity, suggestion });
+  }, [body, severity, suggestion, onChange]);
 
   const submit = async () => {
     if (!body.trim() || busy) return;
@@ -63,6 +73,7 @@ export function CommentForm({
         void submit();
       }}
     >
+      {heading && <p className="form-heading muted">{heading}</p>}
       <textarea
         // biome-ignore lint/a11y/noAutofocus: the form opens because the reviewer asked to write
         autoFocus
