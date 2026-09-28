@@ -43,6 +43,7 @@ lr handoff                         # what the author agent needs to act on, as m
 lr reply 12 --addressed "Added NOT NULL in kxqp"         # author
 lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads (--notes: the author's notes)
+lr diff                            # what changed since your last review, change by change
 lr status
 lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 

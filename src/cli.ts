@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { diff } from "./commands/diff.ts";
 import { featureAbandon, featureClean, featureList, featureStart } from "./commands/feature.ts";
 import {
   finalApply,
@@ -39,6 +40,8 @@ Usage:
   lr review submit [-F <review.json>] [--verdict approved|changes_requested] [-m <body>]
                    [--round <n>]      record a review on the latest (or given) open round
   lr handoff [--round <n>]        what the author needs to act on after a review
+  lr diff [<change>] [--from <n>] [--to <n>] [--name-only]
+                                  what changed between rounds (default: since your last review)
   lr threads [--status <s,…> | --all] [--notes]
   lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]
   lr final show                   the final commits (one per phase) and their drafts
@@ -103,6 +106,14 @@ const COMMANDS: Record<string, Handler> = {
       old: { type: "boolean" },
     });
     return note(ctx, positionals, values);
+  },
+  diff: async (ctx, args) => {
+    const { values, positionals } = parse(args, {
+      from: { type: "string" },
+      to: { type: "string" },
+      "name-only": { type: "boolean" },
+    });
+    return diff(ctx, positionals[0], { ...values, nameOnly: values["name-only"] });
   },
   "review create": async (ctx, args) => {
     const { values } = parse(args, {

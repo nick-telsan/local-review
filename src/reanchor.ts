@@ -145,16 +145,8 @@ export class Reanchorer {
     return (old && (await this.successorsByCommit()).get(old.commitId)) ?? null;
   }
 
-  /** Every earlier commit id → the new-round change whose evolution includes it. */
   private successorsByCommit(): Promise<Map<string, ChangeSnapshot>> {
-    this.successors ??= (async () => {
-      const logs = await Promise.all(this.to.changes.map((c) => this.jj.evolog(c.commitId)));
-      const map = new Map<string, ChangeSnapshot>();
-      for (const [i, c] of this.to.changes.entries()) {
-        for (const id of logs[i]!) if (!map.has(id)) map.set(id, c);
-      }
-      return map;
-    })();
+    this.successors ??= successorsByCommit(this.jj, this.to.changes);
     return this.successors;
   }
 
@@ -239,6 +231,22 @@ export class Reanchorer {
     if (!(await this.jj.isFile(rev, path))) return null;
     return findLines(splitLines(await this.jj.fileContent(rev, path)), snippet);
   }
+}
+
+/**
+ * Every earlier commit id → the change in `changes` whose evolution includes it: the change it
+ * became, or the one it was squashed into.
+ */
+export async function successorsByCommit(
+  jj: Jj,
+  changes: ChangeSnapshot[],
+): Promise<Map<string, ChangeSnapshot>> {
+  const logs = await Promise.all(changes.map((c) => jj.evolog(c.commitId)));
+  const map = new Map<string, ChangeSnapshot>();
+  for (const [i, c] of changes.entries()) {
+    for (const id of logs[i]!) if (!map.has(id)) map.set(id, c);
+  }
+  return map;
 }
 
 /**

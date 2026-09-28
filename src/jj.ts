@@ -161,6 +161,20 @@ export class Jj {
    * before comparing, so what a rebase brought in doesn't count. Messages don't count either. A
    * change that conflicts the same way in both comes out empty.
    */
+  /**
+   * How a change's own diff changed between two of its commits, as a `--git` diff: `jj interdiff`
+   * leaves out what the base changed in between. A message change shows as `JJ-COMMIT-DESCRIPTION`.
+   */
+  async interdiff(from: string, to: string): Promise<string> {
+    return this.run(["interdiff", "--git", "--from", from, "--to", to]);
+  }
+
+  /** The files a commit changes. */
+  async diffFiles(rev: string): Promise<string[]> {
+    const out = await this.run(["diff", "--name-only", "-r", rev]);
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+
   async interdiffFiles(from: string, to: string): Promise<string[]> {
     const out = await this.run(["interdiff", "--name-only", "--from", from, "--to", to]);
     return out.split("\n").filter((l) => l.length > 0);

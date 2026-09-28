@@ -56,14 +56,15 @@ In priority order:
 5. **Design and readability,** in proportion. Skip what a formatter or linter would catch.
 
 On a later round, start with the threads the author replied to and the changes they touched.
+`lr diff --as agent:claude-review` shows what changed since the round you last reviewed, change by
+change, leaving out what a rebase brought in. Unchanged changes you already reviewed don't need
+another pass.
 
 ## 3. Settle earlier threads
 
 For each thread **you** raised that the author marked `addressed`, check the fix in this round.
-For a thread on code or a message, `originalAnchor.commitId` in `lr threads --json` is the change as
-you commented on it. `jj interdiff --git --from <that commit> --to <its commitId in this round>` shows
-what the author changed in it since. Use interdiff rather than `jj diff`, which would also show
-everything that landed on the base if the stack was rebased.
+`lr diff <change> --as agent:claude-review` shows what the author changed in the thread's change
+since you reviewed it (the change id is in the thread's anchor in `lr threads --json`).
 
 ```sh
 lr reply <id> --resolve --as agent:claude-review                       # fixed

@@ -673,6 +673,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr review create --final`                                               | author agent   | a final round (see Finalization)                                              |
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
 | `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
+| `lr diff [<change>] [--from <n>] [--to <n>] [--name-only]`              | anyone         | what changed between rounds, change by change (see below)                     |
 | `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see Thread)                                    |
 | `lr threads [--status <s,…>\|--all] [--notes]`                           | anyone         | list threads, or notes                                                        |
 | `lr final show` · `lr final message <group> -F` · `lr final pr-body -F`  | author agent   | draft the final commits (see Finalization)                                    |
@@ -701,6 +702,13 @@ refuses a feature that's still active.
   there's no undo.
 
 It prints the jj operation to restore to undo the bookmark and workspace changes.
+
+`lr diff` compares two rounds change by change: by default the latest round against the last one
+the actor reviewed, or else the one before it. Each change is `added`, `removed` (abandoned, or
+squashed into the change named), `changed`, or `unchanged`. A changed change's patch is
+`jj interdiff --git` between its two commits, so a rebase alone changes nothing, and a message edit
+shows as a `JJ-COMMIT-DESCRIPTION` file. A change that moved phases, or is conflicted, counts as
+changed. If the earlier commit is gone (`jj util gc`), it shows the whole change and says so.
 
 `lr repo relink` moves a repo's review history to where the repo is now. Without a path, it looks
 for history whose repo is gone and whose latest rounds recorded commits this repo has; it relinks
