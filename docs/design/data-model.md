@@ -290,14 +290,16 @@ interface Thread {
   id: number; // per-feature sequence; rendered as #12
   kind: "comment" | "note";
   anchor: Anchor; // where it points now; when outdated, the last place it was found
-  anchorRound: number | null; // the round whose snapshot `anchor` refers to
+  anchorRound: number | null; // the round whose snapshot `anchor` refers to; null for a new note
+  anchorStack: { baseCommitId: string; changes: { changeId: string; commitId: string }[] } | null;
+  // ^ for a note no round has picked up yet: the stack `anchor` refers to
   anchorState: "current" | "moved" | "outdated"; // relative to originalAnchor; see Re-anchoring
   originalAnchor: Anchor; // where the comment was made; never changes
   severity?: "blocking" | "suggestion" | "nit" | "question";
   status: "proposed" | "open" | "addressed" | "resolved" | "dismissed";
   reviewId?: string; // the review it was created in (comments only)
   createdBy: Actor;
-  createdInRound: number | null; // null for notes left during implementation
+  createdInRound: number | null; // null for notes
   entries: Entry[];
 }
 
@@ -337,7 +339,27 @@ All of these go through `lr reply <thread> [<action>] [<message>]`:
 | `--accept`    | `proposed`                        | `open`      | a human                                  |
 
 `lr threads` lists unsettled threads (`proposed`, `open`, `addressed`), or `--status a,b` or `--all`.
-- Notes start `resolved`. A reviewer reply reopens a note as `open`.
+`--notes` lists notes only, in any status unless `--status` narrows it.
+
+**Notes**
+
+A note is the author annotating their own diff for reviewers, in place of an explanatory comment in
+the code. Notes can't leak into the PR, and there's nothing to clean up at finalization.
+
+```sh
+lr note <change> "<text>"                             # on the change
+lr note <change> <path>:<line>[-<line>] [--old] "<text>"   # on lines of the diff it introduces
+```
+
+- A note is written against the stack as it is now, not a round's snapshot, since it's usually
+  written while a phase is still in progress. Before any phase bookmark exists, the stack runs from
+  the base up to `@`. The location is checked like a review comment's. The note records the stack's
+  change and commit ids (`anchorStack`), and the next round places it from there (see Re-anchoring).
+- Notes start `resolved`, so they don't count as open work.
+- A reply from anyone other than the note's author reopens it as `open`, since it's a question or
+  comment for the author. From then on it's like a review comment: it shows up in the handoff, and
+  whoever reopened it (or a human) resolves it. Anyone but the author can also `--reopen` a note
+  explicitly. The author's own replies leave it alone.
 
 ### Anchor
 
@@ -411,8 +433,10 @@ Per anchor kind:
 5. **Phases** go outdated when the current plan no longer has them. **General** threads are always
    current.
 
-Author notes follow the same process. Agents leave notes on changes that are still being edited, so
-their anchors are re-mapped at every `lr review create`.
+Notes follow the same process, and resolved notes are carried too, because reviewers read them
+next to the code. A note that no round has placed yet is mapped from its `anchorStack` rather than
+a round's snapshot. If it goes outdated there, it keeps `anchorRound` null and tries again from the
+same stack next time.
 
 ### Review submissions
 
@@ -537,8 +561,9 @@ Rules:
 
 - Include every `open` thread on the feature, from any round (reopened ones included), with the
   context needed to act on them. They're shown where they were re-anchored to in the latest round.
-  Outdated threads are marked, with the snippet as it was. `addressed` (waiting on the reviewer), `resolved`, `dismissed`,
-  `proposed` and notes are left out.
+  Outdated threads are marked, with the snippet as it was. `addressed` (waiting on the reviewer),
+  `resolved`, `dismissed` and `proposed` threads are left out. That includes notes, unless
+  someone reopened one.
 - Group by where the fix goes: general → phase → change → file. The agent works change by change
   (`jj edit` / `jj squash --into`), so that's the useful order.
 - Inline the code snippet and the full thread, so the agent doesn't need extra lookups to
@@ -621,13 +646,13 @@ These are the only write paths into the model, so it's worth listing them now:
 | ------------------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------- |
 | `lr feature start <slug> [--base <revset>]`                              | author agent   | create feature                                                                |
 | `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
-| `lr note <change> <path>:<a>-<b> "<text>"`                               | author agent   | author note (was `TEMPORAL`)                                                  |
+| `lr note <change> [<path>:<a>[-<b>] [--old]] "<text>"`                   | author agent   | a note for reviewers on your own change (see Notes)                           |
 | `lr review create [--allow-failing] [--skip-checks]`                     | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |
 | `lr review create --final`                                               | author agent   | a final round (see Finalization)                                              |
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
 | `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
 | `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see Thread)                                    |
-| `lr threads [--status <s,…>\|--all]`                                     | anyone         | list threads                                                                  |
+| `lr threads [--status <s,…>\|--all] [--notes]`                           | anyone         | list threads, or notes                                                        |
 | `lr final show` · `lr final message <group> -F` · `lr final pr-body -F`  | author agent   | draft the final commits (see Finalization)                                    |
 | `lr final cut <change> [--remove]`                                       | developer      | split a phase into more than one final commit                                 |
 | `lr final apply`                                                         | anyone         | squash the stack as approved                                                  |
@@ -672,7 +697,10 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
 - **An approval covers each change's own diff, not its commit id,** so a clean rebase keeps it. The
   checks run again on the rebased commits before anything is finalized.
 - **Repo moves:** `lr repo relink`.
-- **Notes during implementation:** re-anchored at every `lr review create`.
+- **Notes are anchored to the live stack,** because they're written mid-phase, before any round.
+  They're re-anchored at every `lr review create`, resolved or not.
+- **Replying to a note reopens it** (unless you wrote it). A question is the common case, and one
+  that silently went nowhere would be worse than resolving a "thanks".
 - **Final rounds, not a separate artifact:** the final review is a round of kind `final`, so reviews,
   threads, re-anchoring, and the handoff all work unchanged.
 - **Drafts are files; approvals are snapshots.** The developer can edit drafts in their editor, and

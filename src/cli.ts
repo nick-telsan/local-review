@@ -10,6 +10,7 @@ import {
 } from "./commands/final.ts";
 import { handoff } from "./commands/handoff.ts";
 import { HOOK_EVENTS, hook } from "./commands/hook.ts";
+import { note } from "./commands/note.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
 import { rebase } from "./commands/rebase.ts";
 import { reviewCreate } from "./commands/review.ts";
@@ -27,12 +28,14 @@ Usage:
   lr plan submit -F <file>        first plan for the feature (- for stdin)
   lr plan revise -F <file>        a revised plan after review
   lr plan show
+  lr note <change> [<path>:<line>[-<line>] [--old]] "<text>"
+                                  a note for reviewers on your change, instead of a code comment
   lr review create [--allow-failing] [--skip-checks]
   lr review create --final        a final round: the squash groups, messages, and PR body
   lr review submit [-F <review.json>] [--verdict approved|changes_requested] [-m <body>]
                    [--round <n>]      record a review on the latest (or given) open round
   lr handoff [--round <n>]        what the author needs to act on after a review
-  lr threads [--status <s,…> | --all]
+  lr threads [--status <s,…> | --all] [--notes]
   lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]
   lr final show                   the final commits (one per phase) and their drafts
   lr final message <group> -F <file>
@@ -81,6 +84,13 @@ const COMMANDS: Record<string, Handler> = {
     parse(args, {});
     return planShow(ctx);
   },
+  note: async (ctx, args) => {
+    const { values, positionals } = parse(args, {
+      message: { type: "string", short: "m" },
+      old: { type: "boolean" },
+    });
+    return note(ctx, positionals, values);
+  },
   "review create": async (ctx, args) => {
     const { values } = parse(args, {
       "allow-failing": { type: "boolean" },
@@ -120,7 +130,11 @@ const COMMANDS: Record<string, Handler> = {
     return handoff(ctx, { round: values.round });
   },
   threads: async (ctx, args) => {
-    const { values } = parse(args, { status: { type: "string" }, all: { type: "boolean" } });
+    const { values } = parse(args, {
+      status: { type: "string" },
+      all: { type: "boolean" },
+      notes: { type: "boolean" },
+    });
     return threads(ctx, values);
   },
   reply: async (ctx, args) => {

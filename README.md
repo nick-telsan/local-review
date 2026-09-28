@@ -35,13 +35,14 @@ exec bun /path/to/local-review/src/bin.ts "$@"
 lr feature start auth-refresh --base 'trunk()'
 lr plan submit -F plan.md          # markdown with a `phases:` frontmatter block
 # … implement: one commit per task, `jj bookmark set <phase bookmark>` when a phase is done …
+lr note kxqp src/db.ts:40-41 "Temporary until phase 3"   # for reviewers, not in the code
 lr review create                   # snapshot + checks; exits 1 if a check fails
 lr review submit -F review.json --as agent:codex        # a reviewer agent's review
 lr review submit --verdict approved -m "LGTM"            # yours
 lr handoff                         # what the author agent needs to act on, as markdown
 lr reply 12 --addressed "Added NOT NULL in kxqp"         # author
 lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
-lr threads                         # unsettled threads
+lr threads                         # unsettled threads (--notes: the author's notes)
 lr status
 lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 

@@ -6,6 +6,7 @@ import { LrError } from "./errors.ts";
 import type {
   Actor,
   Anchor,
+  AnchorStack,
   AnchorState,
   ChangeSnapshot,
   CheckRun,
@@ -172,6 +173,11 @@ export const MIGRATIONS = [
     applied_at TEXT NOT NULL,
     PRIMARY KEY (feature, round)
   );
+  `,
+  `
+  -- Notes are written against the live stack, before any round has it. Until a round picks a note
+  -- up, anchor_stack holds the change and commit ids its anchor refers to.
+  ALTER TABLE threads ADD COLUMN anchor_stack TEXT;
   `,
 ];
 
@@ -576,6 +582,7 @@ export class Store {
           kind: "comment",
           anchor: c.anchor,
           anchorRound: r.round,
+          anchorStack: null,
           anchorState: "current",
           originalAnchor: c.anchor,
           severity: c.severity,
@@ -700,6 +707,47 @@ export class Store {
     })();
   }
 
+  /**
+   * Record an author's note on their own change. It starts resolved: it's there to be read, and a
+   * reply from someone else reopens it.
+   */
+  addNote(
+    slug: string,
+    n: {
+      anchor: Anchor;
+      anchorStack: AnchorStack;
+      author: Actor;
+      body: string;
+      round: number | null;
+    },
+  ): Thread {
+    return this.db.transaction(() => {
+      const at = now();
+      const { next } = this.db
+        .query("SELECT COALESCE(MAX(id), 0) + 1 AS next FROM threads WHERE feature = ?")
+        .get(slug) as { next: number };
+      const anchor = JSON.stringify(n.anchor);
+      this.db
+        .query(
+          `INSERT INTO threads (feature, id, kind, anchor, original_anchor, anchor_round,
+             anchor_stack, severity, status, anchor_state, review_id, created_by,
+             created_in_round, created_at)
+           VALUES (?, ?, 'note', ?, ?, NULL, ?, NULL, 'resolved', 'current', NULL, ?, NULL, ?)`,
+        )
+        .run(slug, next, anchor, anchor, JSON.stringify(n.anchorStack), formatActor(n.author), at);
+      this.insertEntry(slug, next, {
+        id: Bun.randomUUIDv7(),
+        author: n.author,
+        body: n.body,
+        suggestion: null,
+        statusChange: null,
+        round: n.round,
+        createdAt: at,
+      });
+      return this.getThread(slug, next)!;
+    })();
+  }
+
   /** Threads in id order, with their entries. */
   listThreads(slug: string): Thread[] {
     const rows = this.db
@@ -731,7 +779,12 @@ export class Store {
   /** Record where threads stand after re-anchoring onto a new round. */
   placeThreads(
     slug: string,
-    placements: { id: number; anchor: Anchor; anchorRound: number; anchorState: AnchorState }[],
+    placements: {
+      id: number;
+      anchor: Anchor;
+      anchorRound: number | null;
+      anchorState: AnchorState;
+    }[],
   ): void {
     const update = this.db.query(
       `UPDATE threads SET anchor = ?, anchor_round = ?, anchor_state = ?
@@ -892,6 +945,7 @@ interface ThreadRow {
   kind: string;
   anchor: string;
   anchor_round: number | null;
+  anchor_stack: string | null;
   original_anchor: string;
   severity: string | null;
   status: string;
@@ -907,6 +961,7 @@ function threadFromRow(r: ThreadRow, entries: Entry[]): Thread {
     kind: r.kind as Thread["kind"],
     anchor: JSON.parse(r.anchor) as Anchor,
     anchorRound: r.anchor_round,
+    anchorStack: r.anchor_stack ? (JSON.parse(r.anchor_stack) as AnchorStack) : null,
     anchorState: r.anchor_state as AnchorState,
     originalAnchor: JSON.parse(r.original_anchor) as Anchor,
     severity: r.severity as Severity | null,

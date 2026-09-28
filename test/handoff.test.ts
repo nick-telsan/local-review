@@ -83,6 +83,7 @@ const thread = (anchor: Anchor, extra: Partial<Thread> = {}): Thread => ({
   kind: "comment",
   anchor,
   anchorRound: 2,
+  anchorStack: null,
   anchorState: "current",
   originalAnchor: anchor,
   severity: null,
@@ -180,7 +181,7 @@ describe("buildHandoff: verdict", () => {
 });
 
 describe("buildHandoff: threads", () => {
-  test("only open comment threads, grouped by where the fix goes", () => {
+  test("only open threads (reopened notes too), grouped by where the fix goes", () => {
     nextId = 1;
     const t = {
       general: thread({ kind: "feature" }),
@@ -203,11 +204,12 @@ describe("buildHandoff: threads", () => {
       proposed: thread({ kind: "feature" }, { status: "proposed" }),
       addressed: thread({ kind: "feature" }, { status: "addressed" }),
       resolved: thread({ kind: "feature" }, { status: "resolved" }),
-      note: thread({ kind: "feature" }, { kind: "note" }),
+      note: thread({ kind: "feature" }, { kind: "note", status: "resolved" }),
+      reopenedNote: thread({ kind: "feature" }, { kind: "note" }),
     };
     const h = ready(build({ reviews: [review(codex, null)], threads: Object.values(t) }));
     expect(h.sections.map((s) => [s.depth, s.title, s.threads.map((x) => x.id)])).toEqual([
-      [2, "General", [t.general.id]],
+      [2, "General", [t.general.id, t.reopenedNote.id]],
       [2, "Phase 1: Schema (`auth/1-schema`)", []],
       [
         3,

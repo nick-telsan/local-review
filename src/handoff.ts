@@ -56,7 +56,8 @@ export function buildHandoff(input: {
 }): HandoffResult {
   const { round, phases } = input;
   const reviews = input.reviews.filter((r) => r.state === "submitted");
-  const open = input.threads.filter((t) => t.kind === "comment" && t.status === "open");
+  // A note is open once someone other than its author replies to it, and that needs an answer.
+  const open = input.threads.filter((t) => t.status === "open");
 
   let verdict: Verdict;
   let decidedBy: Handoff["decidedBy"];
@@ -263,12 +264,20 @@ function renderThread(t: Thread, depth: number): string[] {
             ? `PR body${lineRef(a.lines)}`
             : null;
   const outdated = t.anchorState === "outdated";
-  const title = [`#${t.id}`, t.severity, where, outdated && "outdated"].filter(Boolean).join(" · ");
+  const title = [
+    `#${t.id}`,
+    t.kind === "note" ? "your note" : t.severity,
+    where,
+    outdated && "outdated",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const out = [`${"#".repeat(Math.min(depth, 6))} ${title}`, ""];
 
   const hasText = a.kind === "message" || a.kind === "final" || a.kind === "pr_body";
   if (outdated && (a.kind === "code" || hasText)) {
-    out.push(`_This changed after round ${t.anchorRound}. As it was then:_`, "");
+    const since = t.anchorRound === null ? "the note was written" : `round ${t.anchorRound}`;
+    out.push(`_This changed after ${since}. As it was then:_`, "");
   }
   if (a.kind === "code") {
     const width = String(a.lines[1]).length;

@@ -189,7 +189,7 @@ export async function finalCut(
 ): Promise<number> {
   if (!changeArg) throw new LrError("usage: lr final cut <change> [--remove]");
   const s = loadFinal(ctx);
-  const change = findChange(s.round, changeArg);
+  const change = findChange(s.round.changes, changeArg, `round ${s.round.n}`);
   const phase = s.phases.find((p) => p.id === change.phaseId)!;
   const cuts = ctx.store.listCuts(s.feature.slug);
   const isCut = cuts.includes(change.changeId);

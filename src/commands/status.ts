@@ -54,10 +54,14 @@ export async function status(ctx: Context): Promise<number> {
       }
     }
   }
-  const byStatus = Object.entries(Object.groupBy(threads, (t) => t.status)).map(
+  // A resolved note is just there to read; one that's been reopened counts like a comment.
+  const live = threads.filter((t) => t.kind === "comment" || t.status !== "resolved");
+  const byStatus = Object.entries(Object.groupBy(live, (t) => t.status)).map(
     ([s, ts]) => `${ts!.length} ${s}`,
   );
   if (byStatus.length) lines.push(`Threads: ${byStatus.join(", ")}`);
+  const notes = threads.filter((t) => t.kind === "note").length;
+  if (notes) lines.push(`Notes: ${notes} (\`lr threads --notes\`)`);
   const next = nextStep(ctx, feature, round);
   lines.push(`Next: ${next}`);
 

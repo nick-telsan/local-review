@@ -27,6 +27,11 @@ lr plan show --as agent:claude-review         # phases, done_when, bookmarks, th
 lr threads --all --json --as agent:claude-review   # earlier threads, so you don't repeat them
 ```
 
+Threads with `"kind": "note"` are the author's notes on their own changes: why something is shaped
+the way it is, or temporary. Read them with the code they point at. If one doesn't convince you,
+reply to it (`lr reply <id> "<question>" --as agent:claude-review`) rather than opening a new
+comment. That reopens the note for the author, and you resolve it once you're satisfied.
+
 Read the round by **commit id** (`round.changes[].commitId` in the status JSON), not change id. The
 author may already be editing, and commit ids show exactly what was snapshotted.
 

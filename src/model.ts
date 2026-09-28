@@ -178,14 +178,23 @@ export interface Entry {
   createdAt: string;
 }
 
+/** The stack as it was when a note was written: enough to re-anchor it onto the next round. */
+export interface AnchorStack {
+  baseCommitId: string;
+  changes: { changeId: string; commitId: string }[];
+}
+
 export interface Thread {
   /** Per-feature sequence, shown as #12. */
   id: number;
+  /** A reviewer's comment, or an author's note on their own change (`lr note`). */
   kind: "comment" | "note";
   /** Where the thread points now; when outdated, the last place it was found. */
   anchor: Anchor;
-  /** The round whose snapshot `anchor` refers to. */
+  /** The round whose snapshot `anchor` refers to; null for a note no round has picked up yet. */
   anchorRound: number | null;
+  /** For a note with no `anchorRound`: the stack its `anchor` refers to. */
+  anchorStack: AnchorStack | null;
   anchorState: AnchorState;
   /** Where the comment was made. Never changes. */
   originalAnchor: Anchor;

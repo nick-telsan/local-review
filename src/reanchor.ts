@@ -1,7 +1,15 @@
 import { refAt, refCommit, splitLines } from "./anchors.ts";
 import { LrError } from "./errors.ts";
 import type { Hunk, Jj } from "./jj.ts";
-import type { Anchor, AnchorState, ChangeSnapshot, Phase, Round, Thread } from "./model.ts";
+import type {
+  Anchor,
+  AnchorStack,
+  AnchorState,
+  ChangeSnapshot,
+  Phase,
+  Round,
+  Thread,
+} from "./model.ts";
 import type { Store } from "./store.ts";
 
 type CodeAnchor = Extract<Anchor, { kind: "code" }>;
@@ -10,9 +18,16 @@ type MessageAnchor = Extract<Anchor, { kind: "message" }>;
 /** Where a thread landed in a new round. Outdated threads keep their last good anchor and round. */
 export interface Placement {
   anchor: Anchor;
-  anchorRound: number;
+  /** null: an outdated note that no round has placed yet. */
+  anchorRound: number | null;
   anchorState: AnchorState;
 }
+
+/**
+ * What an anchor was made against: a round's snapshot, or (`n` null) the stack a note was
+ * written on.
+ */
+export type Origin = AnchorStack & { n: number | null };
 
 /** One thread's result in `lr review create --json`. */
 export interface ReanchoredThread {
@@ -24,8 +39,17 @@ export interface ReanchoredThread {
 const UNSETTLED = new Set(["proposed", "open", "addressed"]);
 
 /**
- * Carry the feature's unsettled threads onto a new round's snapshot. Resolved and dismissed
- * threads stay where they were; if one is reopened, the next round picks it up from there.
+ * Whether a thread follows the code to each new round: unsettled threads do, and so do resolved
+ * notes, since reviewers read them next to the code.
+ */
+function carried(t: Thread): boolean {
+  return UNSETTLED.has(t.status) || (t.kind === "note" && t.status === "resolved");
+}
+
+/**
+ * Carry the feature's unsettled threads and its notes onto a new round's snapshot. Resolved and
+ * dismissed comments stay where they were; if one is reopened, the next round picks it up from
+ * there. A note no round has picked up yet is placed from the stack it was written on.
  */
 export async function reanchorThreads(input: {
   jj: Jj;
@@ -37,14 +61,18 @@ export async function reanchorThreads(input: {
   const { store, slug, round } = input;
   const threads = store
     .listThreads(slug)
-    .filter((t) => UNSETTLED.has(t.status) && t.anchorRound !== null && t.anchorRound < round.n);
+    .filter(
+      (t) =>
+        carried(t) && (t.anchorRound === null ? t.anchorStack !== null : t.anchorRound < round.n),
+    );
   const reanchorer = new Reanchorer(input.jj, round, input.phases);
   const rounds = new Map<number, Round>();
   const placed: (Placement & { id: number })[] = [];
   for (const t of threads) {
-    const n = t.anchorRound!;
-    if (!rounds.has(n)) rounds.set(n, store.getRound(slug, n)!);
-    placed.push({ id: t.id, ...(await reanchorer.place(t, rounds.get(n)!)) });
+    const n = t.anchorRound;
+    if (n !== null && !rounds.has(n)) rounds.set(n, store.getRound(slug, n)!);
+    const from: Origin = n === null ? { ...t.anchorStack!, n: null } : rounds.get(n)!;
+    placed.push({ id: t.id, ...(await reanchorer.place(t, from)) });
   }
   store.placeThreads(slug, placed);
   return placed.map((p) => ({ id: p.id, anchorState: p.anchorState, anchor: p.anchor }));
@@ -67,7 +95,7 @@ export class Reanchorer {
   }
 
   /** Where `thread`, anchored in `from`, stands in the new round. */
-  async place(thread: Thread, from: Round): Promise<Placement> {
+  async place(thread: Thread, from: Origin): Promise<Placement> {
     const a = thread.anchor;
     // Comments on final messages wait out code rounds, which have no messages to map them onto.
     if ((a.kind === "final" || a.kind === "pr_body") && !this.to.final) {
@@ -79,7 +107,7 @@ export class Reanchorer {
     return { anchor, anchorRound: this.to.n, anchorState: state };
   }
 
-  private async follow(a: Anchor, from: Round): Promise<Anchor | null> {
+  private async follow(a: Anchor, from: Origin): Promise<Anchor | null> {
     switch (a.kind) {
       case "feature":
         return a;
@@ -109,7 +137,7 @@ export class Reanchorer {
    * The change in the new round that `changeId` (as it was in `from`) became: the same change, or
    * the one it was squashed into. null if it was abandoned.
    */
-  private async change(changeId: string, from: Round): Promise<ChangeSnapshot | null> {
+  private async change(changeId: string, from: Origin): Promise<ChangeSnapshot | null> {
     const same = this.to.changes.find((c) => c.changeId === changeId);
     if (same) return same;
     const old = from.changes.find((c) => c.changeId === changeId);
@@ -129,13 +157,13 @@ export class Reanchorer {
     return this.successors;
   }
 
-  private async message(a: MessageAnchor, from: Round): Promise<MessageAnchor | null> {
+  private async message(a: MessageAnchor, from: Origin): Promise<MessageAnchor | null> {
     const c = await this.change(a.changeId, from);
     const placed = c && followLines(splitLines(c.description), a.lines, a.snippet);
     return placed ? { ...a, changeId: c!.changeId, commitId: c!.commitId, ...placed } : null;
   }
 
-  private async code(a: CodeAnchor, from: Round): Promise<CodeAnchor | null> {
+  private async code(a: CodeAnchor, from: Origin): Promise<CodeAnchor | null> {
     // Views keep their endpoints (by change id), so a comment stays in the diff it was made in.
     const end = a.view.to !== "base" && (await this.change(a.view.to.changeId, from));
     if (!end) return null;

@@ -226,6 +226,7 @@ describe("Store", () => {
     const upgraded = await Store.open(old);
     expect(upgraded.getThread("f", 1)).toMatchObject({
       anchorRound: 1,
+      anchorStack: null,
       originalAnchor: { kind: "feature" },
     });
     expect(upgraded.getRound("f", 1)).toMatchObject({ kind: "code", final: null });

@@ -2,28 +2,36 @@ import { posix } from "node:path";
 import { LrError } from "./errors.ts";
 import type { Jj } from "./jj.ts";
 import type { Anchor, ChangeSnapshot, Phase, RevRef, Round } from "./model.ts";
+import type { Snapshot } from "./snapshot.ts";
 import type { CommentInput } from "./submission.ts";
 
 type CodeAnchor = Extract<Anchor, { kind: "code" }>;
 
 /**
  * Turns comment locations from a review file into anchors on a round's snapshot, checking them
- * against the repo as it was when the round was taken.
+ * against the repo as it was when the round was taken. Notes resolve against the live stack's
+ * snapshot instead.
  */
 export class AnchorResolver {
   private readonly jj: Jj;
+  private readonly round: Snapshot & { final: Round["final"] };
+  /** How errors name what the location was checked against: `round 3`, or `the stack`. */
+  private readonly where: string;
 
   constructor(
     jj: Jj,
-    private readonly round: Round,
+    stack: Round | Snapshot,
     private readonly phases: Phase[],
   ) {
-    this.jj = jj.at(round.jjOpId);
+    this.jj = jj.at(stack.jjOpId);
+    const round = "n" in stack ? stack : null;
+    this.round = { ...stack, warnings: [], final: round?.final ?? null };
+    this.where = round ? `round ${round.n}` : "the stack";
   }
 
   async resolve(c: CommentInput): Promise<Anchor> {
     if (c.final !== null || c.prBody) return this.finalAnchor(c);
-    const change = c.change === null ? null : findChange(this.round, c.change);
+    const change = c.change === null ? null : findChange(this.round.changes, c.change, this.where);
 
     if (c.message) {
       return this.messageAnchor(change!, c.lines);
@@ -45,7 +53,7 @@ export class AnchorResolver {
     const final = this.round.final;
     if (!final) {
       throw new LrError(
-        `round ${this.round.n} reviews code; final and pr_body comments need a final round`,
+        `${this.where} reviews code; final and pr_body comments need a final round`,
       );
     }
     let text: string;
@@ -54,7 +62,7 @@ export class AnchorResolver {
       const group = final.groups.find((g) => g.id === c.final);
       if (!group) {
         throw new LrError(
-          `no final commit "${c.final}" in round ${this.round.n} (groups: ${final.groups.map((g) => g.id).join(", ")})`,
+          `no final commit "${c.final}" in ${this.where} (groups: ${final.groups.map((g) => g.id).join(", ")})`,
         );
       }
       text = group.message;
@@ -79,7 +87,7 @@ export class AnchorResolver {
     }
     const changes = this.round.changes.filter((c) => c.phaseId === phaseId);
     if (changes.length === 0) {
-      throw new LrError(`phase ${phaseId} has no changes in round ${this.round.n}`);
+      throw new LrError(`phase ${phaseId} has no changes in ${this.where}`);
     }
     return changes;
   }
@@ -168,17 +176,22 @@ export class AnchorResolver {
   }
 }
 
-type Stack = Pick<Round, "baseCommitId" | "changes">;
+/** A stack's base and changes, as a round or a note's `anchorStack` records them. */
+type Stack = { baseCommitId: string; changes: { changeId: string; commitId: string }[] };
 
-/** A full change id, or a unique prefix of one, in a round. */
-export function findChange(round: Pick<Round, "n" | "changes">, prefix: string): ChangeSnapshot {
-  const matches = round.changes.filter((c) => c.changeId.startsWith(prefix));
+/** A full change id, or a unique prefix of one, among `changes` (`where`: e.g. `round 3`). */
+export function findChange(
+  changes: ChangeSnapshot[],
+  prefix: string,
+  where: string,
+): ChangeSnapshot {
+  const matches = changes.filter((c) => c.changeId.startsWith(prefix));
   if (matches.length === 1) return matches[0]!;
-  const available = round.changes.map((c) => c.changeId.slice(0, 8)).join(", ");
+  const available = changes.map((c) => c.changeId.slice(0, 8)).join(", ");
   if (matches.length === 0) {
-    throw new LrError(`change "${prefix}" isn't in round ${round.n} (changes: ${available})`);
+    throw new LrError(`change "${prefix}" isn't in ${where} (changes: ${available})`);
   }
-  throw new LrError(`change "${prefix}" is ambiguous in round ${round.n}`);
+  throw new LrError(`change "${prefix}" is ambiguous in ${where}`);
 }
 
 /** Position of a ref in a round's stack; the base is -1, and a change not in it is -1 too. */

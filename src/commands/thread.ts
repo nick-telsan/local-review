@@ -2,14 +2,14 @@ import { formatActor } from "../actor.ts";
 import { describeAnchor } from "../anchors.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
-import type { Entry, Thread, ThreadStatus } from "../model.ts";
+import type { Actor, Entry, Thread, ThreadStatus } from "../model.ts";
 
 export type ReplyAction = "addressed" | "resolve" | "dismiss" | "reopen" | "accept";
 
 /**
  * Who may move a thread where. The author marks threads addressed; reviewers (a human, or the
  * agent that raised the thread) resolve, dismiss, and reopen; only humans accept proposed
- * (untriaged) agent comments.
+ * (untriaged) agent comments. A note's reviewer is whoever reopened it.
  */
 const ACTIONS: Record<
   ReplyAction,
@@ -51,16 +51,25 @@ export async function reply(
       );
     }
     const isHuman = ctx.actor.kind === "human";
-    const raisedIt = formatActor(ctx.actor) === formatActor(thread.createdBy);
     if (rule.who === "human" && !isHuman) {
       throw new LrError(`only a human can --${opts.action} a thread`);
     }
-    if (rule.who === "reviewer" && !isHuman && !raisedIt) {
+    if (rule.who === "reviewer" && !isHuman && !isReviewer(ctx.actor, thread)) {
+      const reviewer = reviewerOf(thread);
       throw new LrError(
-        `only a human or the thread's reviewer (${formatActor(thread.createdBy)}) can --${opts.action} it`,
+        reviewer
+          ? `only a human or the thread's reviewer (${formatActor(reviewer)}) can --${opts.action} it`
+          : `only a human or someone other than the note's author can --${opts.action} it`,
       );
     }
     statusChange = { from: thread.status, to: rule.to };
+  } else if (
+    thread.kind === "note" &&
+    thread.status === "resolved" &&
+    !same(ctx.actor, thread.createdBy)
+  ) {
+    // Someone else replying to a note is asking about it, so it goes back to its author.
+    statusChange = { from: "resolved", to: "open" };
   }
 
   // Replies and "addressed" need words; resolving, dismissing, etc. can stand alone.
@@ -90,6 +99,20 @@ export async function reply(
   return 0;
 }
 
+const same = (a: Actor, b: Actor) => formatActor(a) === formatActor(b);
+
+/** Who reviews a thread: whoever raised a comment, or whoever last reopened a note. */
+function reviewerOf(t: Thread): Actor | null {
+  if (t.kind === "comment") return t.createdBy;
+  return t.entries.findLast((e) => e.statusChange?.to === "open")?.author ?? null;
+}
+
+/** A note nobody has reopened can be reviewed by anyone but its author. */
+function isReviewer(actor: Actor, t: Thread): boolean {
+  const reviewer = reviewerOf(t);
+  return reviewer ? same(actor, reviewer) : !same(actor, t.createdBy);
+}
+
 const STATUSES: ThreadStatus[] = ["proposed", "open", "addressed", "resolved", "dismissed"];
 const UNSETTLED: ThreadStatus[] = ["proposed", "open", "addressed"];
 
@@ -98,13 +121,16 @@ export interface ThreadsOk {
   threads: Thread[];
 }
 
-/** List threads: unsettled ones by default, or `--status a,b`, or `--all`. */
+/**
+ * List threads: unsettled ones by default, or `--status a,b`, or `--all`. `--notes` lists the
+ * author's notes (in any status unless `--status` says otherwise).
+ */
 export async function threads(
   ctx: Context,
-  opts: { status?: string; all?: boolean },
+  opts: { status?: string; all?: boolean; notes?: boolean },
 ): Promise<number> {
   let wanted = UNSETTLED;
-  if (opts.all) wanted = STATUSES;
+  if (opts.all || (opts.notes && !opts.status)) wanted = STATUSES;
   else if (opts.status) {
     wanted = opts.status.split(",").map((s) => s.trim()) as ThreadStatus[];
     const bad = wanted.filter((s) => !STATUSES.includes(s));
@@ -113,18 +139,21 @@ export async function threads(
     }
   }
   const feature = ctx.feature();
-  const found = ctx.store.listThreads(feature.slug).filter((t) => wanted.includes(t.status));
+  const found = ctx.store
+    .listThreads(feature.slug)
+    .filter((t) => wanted.includes(t.status) && (!opts.notes || t.kind === "note"));
 
   const json: ThreadsOk = { threads: found };
   ctx.print(
     json,
     found.length === 0
-      ? `No ${wanted.join("/")} threads.`
+      ? `No ${wanted.join("/")} ${opts.notes ? "notes" : "threads"}.`
       : found.map((t) => {
           const first = t.entries[0]!.body.split("\n")[0]!;
           const replies = t.entries.length - 1;
           return (
-            `#${String(t.id).padEnd(4)} ${t.status.padEnd(10)} ${(t.severity ?? "").padEnd(10)} ` +
+            `#${String(t.id).padEnd(4)} ${t.status.padEnd(10)} ` +
+            `${(t.kind === "note" ? "note" : (t.severity ?? "")).padEnd(10)} ` +
             `${describeAnchor(t.anchor)}${t.anchorState === "outdated" ? " (outdated)" : ""}  ` +
             truncate(first, 60) +
             (replies ? `  (+${replies} ${replies === 1 ? "reply" : "replies"})` : "")

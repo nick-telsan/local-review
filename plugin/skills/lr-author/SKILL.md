@@ -65,6 +65,22 @@ if the working copy isn't already there.
   nearest bookmark above it.
 - Follow the repo's own conventions (CLAUDE.md, tests, linters), and run its checks as you go.
 
+### Notes for reviewers
+
+When a reviewer would otherwise stop and ask "why?", leave a note instead of a comment in the code:
+
+```sh
+lr note <change> "<why this change is shaped this way>"
+lr note <change> <path>:<line>[-<line>] "<why these lines>"   # new-side lines of the change's diff
+lr note <change> <path>:<line> --old "<why this was removed>"
+```
+
+Good notes cover code that's temporary until a later phase, a non-obvious choice and the
+alternative you ruled out, or something deliberately left alone. Don't narrate what the diff already
+shows. Notes stay out of the code and the PR, so there's nothing to clean up. They follow the code
+from round to round. If a reviewer replies to one, it reopens and shows up in `lr handoff` like any
+other comment, so answer it the same way.
+
 ## 3. Open a review round
 
 When every phase is done, or the developer asks for a round, run `lr review create`. It snapshots

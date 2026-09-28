@@ -17,11 +17,15 @@ export interface Snapshot {
  * The stack is everything between the base (fork point with `baseRevset`) and the top: the
  * last phase bookmark that exists, extended up to `@` if the working copy sits on top of it
  * (an empty, undescribed `@` is ignored). It must be linear.
+ *
+ * With `beforeBookmarks`, a stack with no phase bookmark yet runs up to `@`, as it does while the
+ * first phase is being written.
  */
 export async function takeSnapshot(
   live: Jj,
   baseRevset: string,
   phases: Phase[],
+  opts: { beforeBookmarks?: boolean } = {},
 ): Promise<Snapshot> {
   const jjOpId = await live.snapshotOp();
   const jj = live.at(jjOpId);
@@ -34,7 +38,7 @@ export async function takeSnapshot(
   for (const c of marked) for (const b of c.bookmarks) bookmarkTarget.set(b, c);
 
   const present = phases.filter((p) => bookmarkTarget.has(p.bookmark));
-  if (present.length === 0) {
+  if (present.length === 0 && !opts.beforeBookmarks) {
     throw new LrError(
       `no phase bookmarks exist yet; create one when a phase is done, e.g.\n` +
         `  jj bookmark create ${phases[0]!.bookmark} -r <change>`,
@@ -47,10 +51,13 @@ export async function takeSnapshot(
     );
   }
 
-  const topBookmark = bookmarkTarget.get(present.at(-1)!.bookmark)!;
-  let top = topBookmark;
+  // With no bookmark yet, the stack runs from the base up to @.
+  const topBookmark = present.length ? bookmarkTarget.get(present.at(-1)!.bookmark)! : null;
+  let top = topBookmark ?? (await jj.single("@"));
   // Only descendants of the top bookmark count; if @ is elsewhere this is empty.
-  const above = await jj.commits(`(${topBookmark.commitId}::@) ~ ${topBookmark.commitId}`);
+  const above = topBookmark
+    ? await jj.commits(`(${topBookmark.commitId}::@) ~ ${topBookmark.commitId}`)
+    : await jj.commits("@ | @-");
   if (above.length > 0) {
     // `above` is newest-first; skip the working copy if it's an empty, undescribed scratch commit.
     const [wc, ...rest] = above;
@@ -60,7 +67,8 @@ export async function takeSnapshot(
 
   const base = await jj.single(`heads(::${top.commitId} & ::(${baseRevset}))`);
   if (base.commitId === top.commitId) {
-    throw new LrError(`stack is empty: ${present.at(-1)!.bookmark} is already in ${baseRevset}`);
+    const what = topBookmark ? present.at(-1)!.bookmark : "the working copy";
+    throw new LrError(`stack is empty: ${what} is already in ${baseRevset}`);
   }
 
   // jj lists children before parents; we want base → tip.
