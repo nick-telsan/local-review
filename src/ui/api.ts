@@ -84,6 +84,10 @@ export interface DraftCommentInput {
   lines?: [number, number];
   side?: "old" | "new";
   message?: boolean;
+  /** A final commit's group id (final rounds). */
+  final?: string;
+  /** The PR body (final rounds). */
+  pr_body?: boolean;
   severity?: Severity | null;
   body: string;
   suggestion?: string | null;

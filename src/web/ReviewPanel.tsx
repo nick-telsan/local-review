@@ -3,10 +3,14 @@ import type { Verdict } from "../model.ts";
 import { ApiError, send } from "./api.ts";
 import { useReview } from "./review.tsx";
 
-const VERDICTS: { value: Verdict | null; label: string; hint: string }[] = [
+const verdicts = (final: boolean): { value: Verdict | null; label: string; hint: string }[] => [
   { value: null, label: "Comment", hint: "Comments only, no verdict" },
   { value: "changes_requested", label: "Request changes", hint: "The author revises" },
-  { value: "approved", label: "Approve", hint: "Ready to finalize" },
+  {
+    value: "approved",
+    label: "Approve",
+    hint: final ? "Ready to apply the final commits" : "Ready to finalize",
+  },
 ];
 
 /** Finish the review: a verdict and summary, then submit the draft's comments with them. */
@@ -68,7 +72,7 @@ export function ReviewPanel() {
           />
           <fieldset className="verdicts">
             <legend className="sr-only">Verdict</legend>
-            {VERDICTS.map((v) => (
+            {verdicts(view.round.kind === "final").map((v) => (
               <label key={v.label} className={verdict === v.value ? "chosen" : undefined}>
                 <input
                   type="radio"

@@ -800,8 +800,8 @@ server-sent event stream when it moves. The page then refetches what it shows.
   change, as `lr diff` compares them. A changed change's interdiff is parsed into files, and a
   message edit is split out of them. Rounds are snapshots, so the server keeps recent comparisons.
 - `POST …/rounds/:n/draft/comments`, `PUT`/`DELETE …/draft/comments/:id`: the actor's draft comments,
-  in review-file form (`change`, `path`, `lines`, `side`, `message`, `severity`, `body`,
-  `suggestion`).
+  in review-file form (`change`, `path`, `lines`, `side`, `message`, `final`, `pr_body`, `severity`,
+  `body`, `suggestion`).
 - `PUT …/rounds/:n/draft` (verdict and summary, saved as they're written), `DELETE …/draft`
   (discard), `POST …/draft/submit` (record it as a review).
 - `POST /api/features/:slug/threads/:id/replies` (`action`, `body`): like `lr reply`. The round view
@@ -809,6 +809,12 @@ server-sent event stream when it moves. The page then refetches what it shows.
 
 Writes push `changed` to other open pages too, since the server's own writes don't move
 `data_version` for its own connection.
+
+**Commenting.** Lines are picked the same way in a diff and in a text (a commit message, a final
+commit's message, the PR body): click a line number, drag across several, or shift-click to
+extend. The form follows the last picked line and keeps what's written; a suggestion that wasn't
+edited follows the pick. A final round shows each final commit's message and the PR body line by
+line, so they take comments like a change's message does.
 
 **Since an earlier round.** A round can show only what changed since an earlier one: by default
 the last round the actor reviewed (the round view's `lastReviewed`), else the one before. It's

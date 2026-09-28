@@ -8,6 +8,7 @@ import { threadChange } from "./RoundPage.tsx";
 import { draftsOn, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
 import { useSince } from "./since.tsx";
+import { TextLines } from "./TextLines.tsx";
 import { ThreadCard, ThreadList } from "./Thread.tsx";
 import { CheckIcon, ErrorBox, Loading, short, subject } from "./ui.tsx";
 
@@ -41,7 +42,6 @@ export function ChangePane({
   const i = view.round.changes.indexOf(change);
   const prev = view.round.changes[i - 1];
   const next = view.round.changes[i + 1];
-  const [, ...body] = change.description.trimEnd().split("\n");
 
   // Line comments on files the diff doesn't show (e.g. lines an interdiff leaves out) go with
   // the change's other comments.
@@ -84,24 +84,20 @@ export function ChangePane({
 
       <section className="message-section">
         <h2>Message</h2>
-        <pre className="message">
-          <strong>{subject(change.description)}</strong>
-          {body.length > 0 && `\n${body.join("\n")}`}
-        </pre>
+        <TextLines
+          className="message-lines"
+          text={change.description}
+          threads={on("message")}
+          drafts={draftsOn(review.drafts, "message", (p) => p.changeId === change.changeId)}
+          target={{ change: change.changeId, message: true }}
+          addLabel="Comment on the whole message"
+        />
         {compared?.message && since && (
           <div className="message-diff">
             <h3 className="muted">Edited since round {since.from}</h3>
             <PlainDiff file={compared.message} />
           </div>
         )}
-        <ThreadList threads={on("message")} />
-        <DraftList
-          drafts={draftsOn(review.drafts, "message", (p) => p.changeId === change.changeId)}
-        />
-        <AddComment
-          label="Comment on the message"
-          target={{ change: change.changeId, message: true }}
-        />
       </section>
 
       <section>

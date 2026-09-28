@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DraftComment } from "../ui/api.ts";
+import type { DraftComment, DraftCommentInput } from "../ui/api.ts";
 import { CommentForm } from "./CommentForm.tsx";
 import { useReview } from "./review.tsx";
 import { Pill } from "./ui.tsx";
@@ -82,13 +82,14 @@ export function DraftList({ drafts }: { drafts: DraftComment[] }) {
   );
 }
 
-/** A button that opens a comment form, for comments on the feature, a change, or a message. */
+/** A button that opens a comment form, for a comment on a whole thing: the feature, a change, a message. */
 export function AddComment({
   label,
   target,
 }: {
   label: string;
-  target: { change?: string; message?: boolean };
+  /** What it's on, in review-file form. */
+  target: Omit<DraftCommentInput, "body" | "lines">;
 }) {
   const review = useReview();
   const [open, setOpen] = useState(false);

@@ -7,6 +7,7 @@ import { ReviewPanel } from "./ReviewPanel.tsx";
 import { draftsOn, makeReview, ReviewContext, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
 import { type Since, SinceBar, SinceProvider, useSinceFor } from "./since.tsx";
+import { TextLines } from "./TextLines.tsx";
 import { ThreadCard, ThreadList } from "./Thread.tsx";
 import {
   ActorName,
@@ -393,10 +394,12 @@ function Overview({ view }: { view: RoundView }) {
 }
 
 function FinalRound({ view }: { view: RoundView }) {
+  const review = useReview();
   const final = view.round.final!;
   const on = (groupId: string) =>
     view.threads.filter((t) => t.placement.on === "final" && t.placement.groupId === groupId);
   const pr = view.threads.filter((t) => t.placement.on === "pr_body");
+  const changes = new Map(view.round.changes.map((c) => [c.changeId, c]));
   return (
     <>
       <section>
@@ -404,17 +407,34 @@ function FinalRound({ view }: { view: RoundView }) {
         {final.groups.map((g) => (
           <div key={g.id} className="final-group">
             <h3>
-              {g.id} <span className="muted">· {g.changeIds.length} changes</span>
+              Commit {g.id}{" "}
+              <span className="muted">
+                · squashes{" "}
+                {g.changeIds
+                  .map((id) => subject(changes.get(id)?.description ?? short(id)))
+                  .join(", ")}
+              </span>
             </h3>
-            <pre className="message">{g.message}</pre>
-            <ThreadList threads={on(g.id)} />
+            <TextLines
+              className="message-lines"
+              text={g.message}
+              threads={on(g.id)}
+              drafts={draftsOn(review.drafts, "final", (p) => p.groupId === g.id)}
+              target={{ final: g.id }}
+              addLabel={`Comment on commit ${g.id}'s whole message`}
+            />
           </div>
         ))}
       </section>
       <section>
         <h2>PR body</h2>
-        <pre className="message">{final.prBody}</pre>
-        <ThreadList threads={pr} />
+        <TextLines
+          text={final.prBody}
+          threads={pr}
+          drafts={draftsOn(review.drafts, "pr_body")}
+          target={{ pr_body: true }}
+          addLabel="Comment on the whole PR body"
+        />
       </section>
     </>
   );

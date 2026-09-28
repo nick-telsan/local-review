@@ -11,8 +11,8 @@ squashed into its final shape and handed off as a PR.
 > **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
 > handoff, threaded replies, comments that follow the code from round to round, finalization
 > (squashing and the PR body), and a Claude Code plugin. The web UI (`lr ui`) shows rounds, diffs,
-> and threads, updates live, and lets you review: comment on lines, messages, and changes, reply,
-> resolve, and submit a verdict. It can also show only what changed since your last review. See [the design](docs/design/data-model.md).
+> and threads, updates live, and lets you review: comment on lines of code, messages, final commits,
+> and the PR body, reply, resolve, and submit a verdict. It can also show only what changed since your last review. See [the design](docs/design/data-model.md).
 
 ## Requirements
 

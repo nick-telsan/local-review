@@ -9,7 +9,7 @@ import { repoDir } from "../src/paths.ts";
 import type { ChangeView, FeaturesOk, ReviewDraft, RoundView, SinceView } from "../src/ui/api.ts";
 import { POLL_MS, startUi, type UiServer } from "../src/ui/server.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
-import { lr } from "./lr.ts";
+import { lr, lrWithStdin } from "./lr.ts";
 
 // main: README.md
 // c1 (phase 1, feat/1-schema): adds db.ts
@@ -412,6 +412,52 @@ describe("drafting a review", () => {
     const res = await api(`${draftPath}/comments`, { method: "POST", body: "{" });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain("must be JSON");
+  });
+});
+
+describe("a final round", () => {
+  test("comments on a final commit's message and the PR body, with lines or without", async () => {
+    await lr(repo, "review", "submit", "--verdict", "approved", "--as", "human:nick");
+    for (const [what, text] of [
+      ["message 1", "Add the db\n\nWith a body."],
+      ["message 2", "Rotate"],
+      ["pr-body", "## Summary\n\nA db, rotated."],
+    ] as const) {
+      const r = await lrWithStdin(repo, text, "final", ...what.split(" "), "-F", "-");
+      expect(r.err).toBe("");
+    }
+    expect((await lr(repo, "review", "create", "--final")).code).toBe(0);
+
+    const draft = "/features/feat/rounds/2/draft";
+    const comments = [
+      { final: "1", lines: [3, 3], body: "Say why.", suggestion: "With a body, because." },
+      { final: "2", body: "Fine." },
+      { pr_body: true, lines: [3, 3], severity: "nit", body: "Past tense?" },
+      { pr_body: true, body: "Add testing notes." },
+    ];
+    for (const c of comments) expect((await send(`POST`, `${draft}/comments`, c)).status).toBe(200);
+    const bad = await send("POST", `${draft}/comments`, { final: "9", body: "?" });
+    expect(bad.data.error).toContain('no final commit "9" in round 2');
+
+    const drafted = (await json<RoundView>("/features/feat/rounds/2")).draft!;
+    expect(drafted.comments.map((c) => c.placement)).toEqual([
+      { on: "final", groupId: "1", lines: [3, 3] },
+      { on: "final", groupId: "2", lines: null },
+      { on: "pr_body", lines: [3, 3] },
+      { on: "pr_body", lines: null },
+    ]);
+    const ok = await send<ReviewSubmitOk>("POST", `${draft}/submit`, { verdict: "approved" });
+    expect(ok.status).toBe(200);
+    const view = await json<RoundView>("/features/feat/rounds/2");
+    expect(
+      view.threads.map((t) => [t.anchor.kind, "snippet" in t.anchor && t.anchor.snippet]),
+    ).toEqual([
+      ["final", ["With a body."]],
+      ["final", ["Rotate"]],
+      ["pr_body", ["A db, rotated."]],
+      ["pr_body", ["## Summary", "", "A db, rotated."]],
+    ]);
+    expect(view.threads[0]!.entries[0]!.suggestion).toBe("With a body, because.");
   });
 });
 
