@@ -89,8 +89,8 @@ Freeform context, decisions, risks…
 ```
 
 Commits can reference tasks with a `Plan-Task: 1.1` trailer (several: `Plan-Task: 1.1, 1.2`, or
-one trailer each). The web UI's plan page shows which tasks the round's changes name, and which
-none do.
+one trailer each). The web UI's plan page shows which tasks the round's changes name, and `lr status` and
+`lr handoff` list the gaps: tasks no change names, unknown task ids, and changes naming no task.
 
 ### Reviews
 

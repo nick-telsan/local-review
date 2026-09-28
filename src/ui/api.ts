@@ -11,6 +11,7 @@ import {
 } from "../commands/submit.ts";
 import { allowedActions, applyReply, type ReplyAction, type ReplyOk } from "../commands/thread.ts";
 import type { Context } from "../context.ts";
+import { coverage, type PlanCoverage } from "../coverage.ts";
 import { LrError } from "../errors.ts";
 import type {
   Actor,
@@ -21,7 +22,6 @@ import type {
   Review,
   Round,
   Severity,
-  Task,
   Thread,
   ThreadStatus,
   Verdict,
@@ -161,31 +161,7 @@ export interface PlanText {
   body: string;
 }
 
-/** A task, and the changes that say they implement it (`Plan-Task: <id>`), in stack order. */
-export interface TaskCoverage {
-  task: Task;
-  changeIds: string[];
-}
-
-export interface PhaseCoverage {
-  phaseId: number;
-  tasks: TaskCoverage[];
-  /** The changes in the phase (by its bookmark), in stack order. */
-  changeIds: string[];
-  /** Changes in the phase that name no task. */
-  untasked: string[];
-}
-
-/** How the round's changes line up with its plan. */
-export interface PlanCoverage {
-  phases: PhaseCoverage[];
-  /** Changes naming a task the plan doesn't have. */
-  unknownTasks: { changeId: string; taskId: string }[];
-  /** Changes past the last phase's bookmark. */
-  unphased: string[];
-  /** Whether any change names a task: without that, there's no coverage to show. */
-  linked: boolean;
-}
+export type { PhaseCoverage, PlanCoverage, TaskCoverage } from "../coverage.ts";
 
 /** `GET /api/features/:slug/rounds/:n/plan` */
 export interface PlanView {
@@ -310,38 +286,6 @@ export async function planView(ctx: Context, slug: string, n: string): Promise<P
   }
   const phases = ctx.store.getPlanVersion(slug, round.planVersion)!.phases;
   return { version: round.planVersion, versions, coverage: coverage(round, phases) };
-}
-
-/** The task ids a change names in `Plan-Task` trailers (`1.1`, or several: `1.1, 1.2`). */
-function taskIds(change: Round["changes"][number]): string[] {
-  return change.trailers
-    .filter(([key]) => key.toLowerCase() === "plan-task")
-    .flatMap(([, value]) => value.split(/[\s,]+/))
-    .filter(Boolean);
-}
-
-function coverage(round: Round, phases: Phase[]): PlanCoverage {
-  const known = new Set(phases.flatMap((p) => p.tasks.map((t) => t.id)));
-  const named = round.changes.map((c) => ({ id: c.changeId, tasks: taskIds(c), phase: c.phaseId }));
-  return {
-    phases: phases.map((p) => {
-      const inPhase = named.filter((c) => c.phase === p.id);
-      return {
-        phaseId: p.id,
-        tasks: p.tasks.map((task) => ({
-          task,
-          changeIds: named.filter((c) => c.tasks.includes(task.id)).map((c) => c.id),
-        })),
-        changeIds: inPhase.map((c) => c.id),
-        untasked: inPhase.filter((c) => c.tasks.length === 0).map((c) => c.id),
-      };
-    }),
-    unknownTasks: named.flatMap((c) =>
-      c.tasks.filter((t) => !known.has(t)).map((taskId) => ({ changeId: c.id, taskId })),
-    ),
-    unphased: named.filter((c) => c.phase === null).map((c) => c.id),
-    linked: named.some((c) => c.tasks.length > 0),
-  };
 }
 
 // Rounds are snapshots, so comparing two never gives a different answer: keep recent ones.

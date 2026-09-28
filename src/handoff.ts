@@ -1,6 +1,7 @@
 import { extname } from "node:path";
 import { formatActor } from "./actor.ts";
 import { formatLines } from "./anchors.ts";
+import { describeGap, type PlanGap, planGaps } from "./coverage.ts";
 import type {
   Anchor,
   ChangeSnapshot,
@@ -37,6 +38,8 @@ export interface Handoff {
   /** Every open thread on the feature (not just this round's), in reading order. */
   threads: Thread[];
   sections: HandoffSection[];
+  /** Where a code round's changes and its plan's tasks don't line up (see `planGaps`). */
+  planGaps: { gap: PlanGap; text: string }[];
   nextSteps: string[];
 }
 
@@ -77,6 +80,7 @@ export function buildHandoff(input: {
   }
 
   const sections = groupThreads(open, round.changes, phases);
+  const planGapsFound = round.kind === "code" ? planGaps(round, phases) : [];
   const threads = sections.flatMap((s) => s.threads);
   const failingChecks = input.checks.filter((c) => c.status !== "pass");
 
@@ -94,7 +98,14 @@ export function buildHandoff(input: {
       failingChecks,
       threads,
       sections,
-      nextSteps: nextSteps(round.kind, verdict, threads.length, failingChecks.length),
+      planGaps: planGapsFound.map((gap) => ({ gap, text: describeGap(gap, round.changes) })),
+      nextSteps: nextSteps(
+        round.kind,
+        verdict,
+        threads.length,
+        failingChecks.length,
+        planGapsFound.length,
+      ),
     },
   };
 }
@@ -181,7 +192,13 @@ function byLocation(a: Thread, b: Thread): number {
   return a.id - b.id;
 }
 
-function nextSteps(kind: Round["kind"], verdict: Verdict, open: number, failing: number): string[] {
+function nextSteps(
+  kind: Round["kind"],
+  verdict: Verdict,
+  open: number,
+  failing: number,
+  gaps: number,
+): string[] {
   if (kind === "final") {
     if (verdict === "approved" && open === 0) {
       return ["The final commits are approved. Run `lr final apply` to squash the stack."];
@@ -203,6 +220,13 @@ function nextSteps(kind: Round["kind"], verdict: Verdict, open: number, failing:
   }
   return [
     ...(failing ? ["Fix the failing checks listed above."] : []),
+    ...(gaps
+      ? [
+          "Close the plan gaps listed above: implement the missing tasks, add a " +
+            "`Plan-Task: <id>` trailer to the change that does each, or drop the task in the " +
+            "revised plan and say why.",
+        ]
+      : []),
     "Write a revised plan that covers every open thread above, and says why for any you " +
       "won't change: `lr plan revise -F <file>`.",
     "Amend the changes the threads are on, in place (`jj edit <change>`, or `jj squash --into " +
@@ -251,6 +275,11 @@ export function renderHandoff(h: Handoff): string {
   for (const s of h.sections) {
     out.push("", `${"#".repeat(s.depth)} ${s.title}`);
     for (const t of s.threads) out.push("", ...renderThread(t, s.depth + 1));
+  }
+
+  if (h.planGaps.length) {
+    out.push("", `## Plan gaps (Plan-Task trailers vs plan v${h.planVersion})`, "");
+    for (const g of h.planGaps) out.push(`- ${g.text}`);
   }
 
   out.push("", "## Next steps", "");
