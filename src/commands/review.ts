@@ -117,7 +117,7 @@ export async function reviewCreate(
 export const checkJson = (r: CheckResult): CheckResultJson => ({ ...r.run, cached: r.cached });
 
 /** A progress line on stderr, unless the output is JSON. */
-function progress(ctx: Context, line: string): void {
+export function progress(ctx: Context, line: string): void {
   if (!ctx.json) ctx.io.err(line);
 }
 

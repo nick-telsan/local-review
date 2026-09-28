@@ -56,6 +56,8 @@ export async function runChecks(opts: {
   targets: CheckTarget[];
   trigger: CheckRun["trigger"];
   log: (line: string) => void;
+  /** Run even checks that already passed at the same commit. */
+  rerun?: boolean;
 }): Promise<CheckResult[]> {
   const { store, slug, featureDir, targets, log } = opts;
   const logDir = join(featureDir, "checks");
@@ -64,7 +66,8 @@ export async function runChecks(opts: {
   const results: CheckResult[] = [];
   const toRun: CheckTarget[] = [];
   for (const t of targets) {
-    const cached = store.findPassingCheck(slug, t.check.name, t.check.run, t.change.commitId);
+    const cached =
+      !opts.rerun && store.findPassingCheck(slug, t.check.name, t.check.run, t.change.commitId);
     if (cached) results.push({ run: cached, cached: true });
     else toRun.push(t);
   }

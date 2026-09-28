@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { check } from "./commands/check.ts";
 import { diff } from "./commands/diff.ts";
 import { featureAbandon, featureClean, featureList, featureStart } from "./commands/feature.ts";
 import {
@@ -36,6 +37,8 @@ Usage:
   lr note <change> [<path>:<line>[-<line>] [--old]] "<text>"
                                   a note for reviewers on your change, instead of a code comment
   lr review create [--allow-failing] [--skip-checks]
+  lr check [<change>…] [--check <name,…>] [--round <n>] [--rerun]
+                                  run checks by hand: on the stack now, or on a round's commits
   lr review create --final        a final round: the squash groups, messages, and PR body
   lr review submit [-F <review.json>] [--verdict approved|changes_requested] [-m <body>]
                    [--round <n>]      record a review on the latest (or given) open round
@@ -106,6 +109,14 @@ const COMMANDS: Record<string, Handler> = {
       old: { type: "boolean" },
     });
     return note(ctx, positionals, values);
+  },
+  check: async (ctx, args) => {
+    const { values, positionals } = parse(args, {
+      check: { type: "string" },
+      round: { type: "string" },
+      rerun: { type: "boolean" },
+    });
+    return check(ctx, positionals, values);
   },
   diff: async (ctx, args) => {
     const { values, positionals } = parse(args, {

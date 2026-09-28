@@ -39,7 +39,10 @@ author may already be editing, and commit ids show exactly what was snapshotted.
 - A phase or the whole stack: `jj diff --git --from <commit before it> --to <last commitId>`. The
   stack's base is `round.baseCommitId`.
 - A file as of a change: `jj file show -r <commitId> <path>`
-- A failing check's log: its path is in the status JSON.
+- A failing check's log: its path is in the status JSON. If it looks flaky, rerun it on the round's
+  commits with `lr check --round <n> --check <name> --rerun --as agent:claude-review`. To run a
+  check on a change it doesn't normally cover (say, the tests on a middle change), name the change:
+  `lr check --round <n> <change> --check <name>`.
 
 Don't write files inside the repo. jj would snapshot them into the author's change.
 

@@ -238,7 +238,7 @@ interface CheckRun {
   command: string; // part of the cache key: editing a check's command invalidates old passes
   changeId: string;
   commitId: string; // stale if ≠ the change's commit in the latest round
-  trigger: "auto" | "manual"; // manual = a reviewer ran it on a specific commit
+  trigger: "auto" | "manual"; // manual = someone ran it with `lr check`
   status: "pending" | "running" | "pass" | "fail" | "error" | "skipped";
   exitCode?: number;
   logPath: string;
@@ -260,6 +260,14 @@ in their environment.
 
 If a check fails, or a change is conflicted (conflicts propagate to descendants), no round is
 opened. The runs are still recorded, so their logs are available for the fix.
+
+`lr check` runs checks by hand. By default it checks the stack as it is now (even before the phase
+bookmarks exist), with the same targets `lr review create` would use, so an author can confirm a
+fix first. Passing runs are cached the same way, so the next round reuses them. With `--round <n>`,
+it checks that round's commits instead, and adds the runs to the round. A round shows the latest run
+of each check on each change, so a reviewer who reruns a flaky failure (`--rerun` skips the cache)
+replaces it in `lr status` and the handoff. Named changes get every check (or the ones `--check`
+picks), whatever their `at`. It exits 1 if any check doesn't pass.
 
 Each check (and setup) runs in its own process group, so stopping it stops everything it started,
 not just the shell. A check past its timeout gets SIGTERM, then SIGKILL after `kill_after`; the run
@@ -670,6 +678,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
 | `lr note <change> [<path>:<a>[-<b>] [--old]] "<text>"`                   | author agent   | a note for reviewers on your own change (see Notes)                           |
 | `lr review create [--allow-failing] [--skip-checks]`                     | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |
+| `lr check [<change>…] [--check <name,…>] [--round <n>] [--rerun]`       | anyone         | run checks by hand, on the stack now or a round's commits (see Checks)       |
 | `lr review create --final`                                               | author agent   | a final round (see Finalization)                                              |
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
 | `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |

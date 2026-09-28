@@ -87,8 +87,9 @@ When every phase is done, or the developer asks for a round, run `lr review crea
 the stack, runs the checks in `.local-review.toml`, and opens round N.
 
 - Exit code 1 means no round was opened. Either a check failed (the output has its log path) or a
-  change is conflicted. Fix it in the change where it belongs and run it again. Only use
-  `--allow-failing` if the developer says so.
+  change is conflicted. Fix it in the change where it belongs, confirm with
+  `lr check <change> --check <name>`, and run it again. Only use `--allow-failing` if the
+  developer says so.
 - Read the warnings: undescribed changes, changes outside every phase, phases with no changes.
 - It also carries open threads from earlier rounds onto the new stack, and reports which moved or
   went outdated.

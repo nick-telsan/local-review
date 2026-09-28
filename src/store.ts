@@ -528,14 +528,27 @@ export class Store {
       .run(u.status, u.exitCode ?? null, u.startedAt ?? null, u.finishedAt ?? null, id);
   }
 
+  /** A round's check runs: the latest of each check on each change (a rerun replaces a run). */
   roundChecks(slug: string, n: number): CheckRun[] {
     const rows = this.db
       .query(
         `SELECT c.* FROM check_runs c JOIN round_checks rc ON rc.check_run_id = c.id
-         WHERE rc.feature = ? AND rc.round = ? ORDER BY c.started_at`,
+         WHERE rc.feature = ? AND rc.round = ? ORDER BY c.started_at, c.id`,
       )
       .all(slug, n) as CheckRow[];
-    return rows.map(checkFromRow);
+    const latest = new Map<string, CheckRun>();
+    for (const run of rows.map(checkFromRow)) latest.set(`${run.check}\0${run.changeId}`, run);
+    return [...latest.values()];
+  }
+
+  /** Add check runs to a round, e.g. ones a reviewer ran on its commits. */
+  linkRoundChecks(slug: string, n: number, runIds: string[]): void {
+    const link = this.db.query(
+      "INSERT OR IGNORE INTO round_checks (feature, round, check_run_id) VALUES (?, ?, ?)",
+    );
+    this.db.transaction(() => {
+      for (const id of runIds) link.run(slug, n, id);
+    })();
   }
 
   // ── reviews & threads ─────────────────────────────────────────────────────
