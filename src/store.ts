@@ -271,6 +271,11 @@ export class Store {
     this.db.query("UPDATE features SET status = ? WHERE slug = ?").run(status, slug);
   }
 
+  /** Delete a feature and everything recorded about it (rounds, reviews, threads, checks). */
+  deleteFeature(slug: string): void {
+    this.db.query("DELETE FROM features WHERE slug = ?").run(slug);
+  }
+
   setBaseRevset(slug: string, baseRevset: string): void {
     this.db.query("UPDATE features SET base_revset = ? WHERE slug = ?").run(baseRevset, slug);
   }

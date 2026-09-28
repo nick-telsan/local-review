@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { featureList, featureStart } from "./commands/feature.ts";
+import { featureAbandon, featureClean, featureList, featureStart } from "./commands/feature.ts";
 import {
   finalApply,
   finalCut,
@@ -25,6 +25,9 @@ const USAGE = `lr — local review for agentic development
 Usage:
   lr feature start <slug> [--title <title>] [--base <revset>]
   lr feature list
+  lr feature abandon [<slug>]
+  lr feature clean [<slug>…] [--purge]
+                                  forget finished features' bookmarks and check workspaces
   lr plan submit -F <file>        first plan for the feature (- for stdin)
   lr plan revise -F <file>        a revised plan after review
   lr plan show
@@ -77,6 +80,14 @@ const COMMANDS: Record<string, Handler> = {
   "feature list": async (ctx, args) => {
     parse(args, {});
     return featureList(ctx);
+  },
+  "feature abandon": async (ctx, args) => {
+    const { positionals } = parse(args, {});
+    return featureAbandon(ctx, positionals[0]);
+  },
+  "feature clean": async (ctx, args) => {
+    const { values, positionals } = parse(args, { purge: { type: "boolean" } });
+    return featureClean(ctx, positionals, values);
   },
   "plan submit": async (ctx, args) => planSubmit(ctx, "submit", parse(args, FILE).values.file),
   "plan revise": async (ctx, args) => planSubmit(ctx, "revise", parse(args, FILE).values.file),

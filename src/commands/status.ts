@@ -14,8 +14,8 @@ const NEXT: Record<FeatureStatus, string> = {
     "and run `lr review create --final`",
   final_review: "waiting on final review",
   approved: "run `lr final apply` to squash the stack",
-  done: "nothing — the stack is squashed; push it and open the PR",
-  abandoned: "nothing — feature was abandoned",
+  done: "push the stack and open the PR; once it lands, `lr feature clean` forgets its bookmarks",
+  abandoned: "nothing; `lr feature clean` forgets its bookmarks and check workspace",
 };
 
 export async function status(ctx: Context): Promise<number> {

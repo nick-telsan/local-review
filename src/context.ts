@@ -67,8 +67,15 @@ export class Context {
       .listFeatures()
       .filter((f) => f.status !== "done" && f.status !== "abandoned");
     if (active.length === 1) return active[0]!;
-    if (active.length === 0)
-      throw new LrError("no active feature; start one with `lr feature start <slug>`");
+    if (active.length === 0) {
+      const finished = this.store.listFeatures().map((f) => `${f.slug} (${f.status})`);
+      throw new LrError(
+        "no active feature; start one with `lr feature start <slug>`" +
+          (finished.length
+            ? `, or pick a finished one with --feature: ${finished.join(", ")}`
+            : ""),
+      );
+    }
     throw new LrError(
       `several active features (${active.map((f) => f.slug).join(", ")}); pick one with --feature or $LR_FEATURE`,
     );

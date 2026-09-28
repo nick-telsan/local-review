@@ -180,6 +180,24 @@ export class Jj {
     await this.run(["describe", rev, "-m", message]);
   }
 
+  /**
+   * Forget local bookmarks. Unlike deleting, this never propagates to a remote: remote bookmarks
+   * they tracked become untracked.
+   */
+  async forgetBookmarks(names: string[]): Promise<void> {
+    if (names.length) await this.run(["bookmark", "forget", ...names.map((n) => `exact:${n}`)]);
+  }
+
+  async workspaceNames(): Promise<string[]> {
+    const out = await this.run(["workspace", "list", "-T", 'name ++ "\n"']);
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+
+  /** Stop tracking a workspace; jj abandons its working-copy commit if it's empty. */
+  async forgetWorkspace(name: string): Promise<void> {
+    await this.run(["workspace", "forget", name]);
+  }
+
   /** Put the repo back as it was at operation `op`. */
   async restoreOp(op: string): Promise<void> {
     await this.run(["op", "restore", op]);

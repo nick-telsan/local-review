@@ -75,7 +75,7 @@ export async function runChecks(opts: {
   for (const t of toRun)
     byCommit.set(t.change.commitId, [...(byCommit.get(t.change.commitId) ?? []), t]);
 
-  const ws = await CheckWorkspace.open(opts.jj, slug, join(featureDir, "workspaces", "checks"));
+  const ws = await CheckWorkspace.open(opts.jj, slug, checkWorkspaceDir(featureDir));
   try {
     for (const [commitId, group] of byCommit) {
       const change = group[0]!.change;
@@ -171,6 +171,16 @@ async function execLogged(
   }
 }
 
+/** The jj workspace a feature's checks run in. */
+export function checkWorkspaceName(slug: string): string {
+  return `lr-${slug}-checks`;
+}
+
+/** Where that workspace lives, under the feature's directory. */
+export function checkWorkspaceDir(featureDir: string): string {
+  return join(featureDir, "workspaces", "checks");
+}
+
 /** A jj workspace owned by local-review, used only to run checks. */
 class CheckWorkspace {
   private constructor(
@@ -179,7 +189,7 @@ class CheckWorkspace {
   ) {}
 
   static async open(repo: Jj, slug: string, dir: string): Promise<CheckWorkspace> {
-    const name = `lr-${slug}-checks`;
+    const name = checkWorkspaceName(slug);
     if (!existsSync(join(dir, ".jj"))) {
       // Created at the root commit; `checkout` moves it where it's needed.
       mkdirSync(join(dir, ".."), { recursive: true });

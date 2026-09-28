@@ -150,7 +150,8 @@ body.
 6. **Once the developer approves the final round,** run `lr final apply`. It squashes each group into
    its last change (which keeps the phase bookmark) with the approved message, and checks the
    result matches what was approved. Then tell the developer it's ready to push. Only push or open
-   the PR if they asked you to.
+   the PR if they asked you to. Once it lands, `lr feature clean` forgets the phase bookmarks.
+   Leave that, and `lr feature abandon`, to the developer.
 
 Only the developer decides how a phase is split: `lr final cut <change>` starts a new final commit at
 that change. Don't edit the drafts after the final round is approved. lr refuses to apply drafts

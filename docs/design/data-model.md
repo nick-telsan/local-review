@@ -659,12 +659,26 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr status [--json]`                                                     | anyone         | feature state + what's expected next                                          |
 | `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack onto its base (`--onto`: a new base); see Rebase             |
 | `lr hook session-start\|pre-tool-use\|stop`                              | Claude Code    | hook handlers; see Claude Code integration                                    |
-| `lr feature clean <slug> [--purge]`                                      | developer      | clean up a done/abandoned feature (see below)                                 |
+| `lr feature abandon [<slug>]`                                            | human          | give up on a feature (history and commits are kept)                           |
+| `lr feature clean [<slug>…] [--purge]`                                   | anyone; `--purge`: human | tidy up after finished features (see below)                         |
 | `lr repo relink <path>`                                                  | developer      | repair the repo key after the repo moves                                      |
 
-`lr feature clean` deletes phase bookmarks that still point where `lr` left them. Any bookmark that
-has moved since is skipped with a warning. It also forgets the jj workspaces and removes their
-directories. Review state is kept for history unless `--purge` is passed.
+`lr feature clean` tidies up after done and abandoned features: the ones named, or all of them. It
+refuses a feature that's still active.
+
+- **Phase bookmarks** (from the current plan, and the plan of the last round) are forgotten if
+  they're still on the change where the last round saw them. That includes after `lr final apply`,
+  since squashing keeps each group's last change id. A bookmark that moved, is conflicted, or that
+  no round ever recorded is kept, with the reason. Forgetting (`jj bookmark forget`) never touches
+  a remote: remote bookmarks they tracked become untracked. Deleting the pushed branch is left to
+  the developer or the forge.
+- **The checks workspace** is forgotten, and its directory removed.
+- **Commits are never touched.**
+- **Review history is kept** (plans, rounds, threads, drafts, check logs) unless `--purge`, which
+  deletes the feature's state and directory. `--purge` needs a human and named features, because
+  there's no undo.
+
+It prints the jj operation to restore to undo the bookmark and workspace changes.
 
 ### Claude Code integration
 
@@ -689,7 +703,9 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
 ## 6. Decisions log
 
 - **jj only.** Colocated git repos should work, but only through jj.
-- **Bookmarks after `final apply`:** kept. `lr feature clean` removes them later.
+- **Bookmarks after `final apply`:** kept, for pushing. `lr feature clean` forgets them later,
+  locally only: lr never deletes anything on a remote.
+- **Abandoning is a human's call** (`lr feature abandon`), like approving.
 - **Rebases leave no trace in lr's state.** `lr rebase` is a convenience over `jj rebase`, and lr
   treats both the same way. There's no rebase record: the undo point is in jj's operation log. A
   rebase doesn't supersede an open round, since the round's snapshot is still what its reviewers
