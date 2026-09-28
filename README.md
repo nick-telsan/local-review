@@ -12,7 +12,8 @@ squashed into its final shape and handed off as a PR.
 > handoff, threaded replies, comments that follow the code from round to round, finalization
 > (squashing and the PR body), and a Claude Code plugin. The web UI (`lr ui`) shows rounds, diffs,
 > and threads, updates live, and lets you review: comment on lines of code, messages, final commits,
-> and the PR body, reply, resolve, and submit a verdict. It can also show only what changed since your last review. See [the design](docs/design/data-model.md).
+> and the PR body, reply, resolve, and submit a verdict. It shows the plan next to what the round
+> implements. It can also show only what changed since your last review. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -87,7 +88,9 @@ phases:
 Freeform context, decisions, risks…
 ```
 
-Commits can reference tasks with a `Plan-Task: 1.1` trailer.
+Commits can reference tasks with a `Plan-Task: 1.1` trailer (several: `Plan-Task: 1.1, 1.2`, or
+one trailer each). The web UI's plan page shows which tasks the round's changes name, and which
+none do.
 
 ### Reviews
 

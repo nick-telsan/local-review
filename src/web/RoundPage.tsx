@@ -1,8 +1,9 @@
 import type { ChangeSnapshot, Phase, ThreadStatus } from "../model.ts";
-import type { RoundView, ThreadView } from "../ui/api.ts";
+import type { PlanView, RoundView, ThreadView } from "../ui/api.ts";
 import { send, useApi } from "./api.ts";
 import { ChangePane } from "./ChangePane.tsx";
 import { AddComment, DraftList } from "./Draft.tsx";
+import { PlanPane, planPath } from "./PlanPane.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { draftsOn, makeReview, ReviewContext, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
@@ -34,7 +35,17 @@ export function threadChange(t: ThreadView): string | null {
   return "changeId" in p ? p.changeId : null;
 }
 
-export function RoundPage({ slug, n, change }: { slug: string; n: string; change: string | null }) {
+export function RoundPage({
+  slug,
+  n,
+  change,
+  plan,
+}: {
+  slug: string;
+  n: string;
+  change: string | null;
+  plan: boolean;
+}) {
   const { data, error } = useApi<RoundView>(
     `/features/${encodeURIComponent(slug)}/rounds/${encodeURIComponent(n)}`,
   );
@@ -58,7 +69,7 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
       <SinceProvider value={since}>
         <TopBar slug={slug} view={data} />
         <div className="round-layout">
-          <Sidebar view={data} base={base} selected={change} since={since} />
+          <Sidebar view={data} base={base} selected={plan ? "plan" : change} since={since} />
           <main className="round-main">
             <SinceBar view={data} />
             {!data.latest && (
@@ -69,8 +80,10 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
               </div>
             )}
             <DraftBanners view={data} />
-            {change === null ? (
-              <Overview view={data} />
+            {plan ? (
+              <PlanPane view={data} base={base} />
+            ) : change === null ? (
+              <Overview view={data} base={base} />
             ) : selected ? (
               <ChangePane view={data} change={selected} base={base} />
             ) : (
@@ -172,6 +185,7 @@ function Sidebar({
 }: {
   view: RoundView;
   base: string;
+  /** A change id, `plan`, or null for the overview. */
   selected: string | null;
   since: Since | null;
 }) {
@@ -186,6 +200,13 @@ function Sidebar({
       <Link to={href(base)} className={`side-item overview${selected === null ? " current" : ""}`}>
         <span>Overview</span>
         {general > 0 && <span className="count">{general}</span>}
+      </Link>
+      <Link
+        to={href(`${base}/plan`)}
+        className={`side-item overview${selected === "plan" ? " current" : ""}`}
+      >
+        <span>Plan</span>
+        <span className="muted mono">v{view.round.planVersion}</span>
       </Link>
       {byPhase(view.round.changes, view.phases).map(({ phase, changes }) => (
         <section key={phase?.id ?? "none"} className="side-phase">
@@ -274,7 +295,7 @@ function SinceMark({ status }: { status: keyof typeof SINCE_MARK }) {
   return <span className={`since-mark since-mark-${status}`}>{SINCE_MARK[status]}</span>;
 }
 
-function Overview({ view }: { view: RoundView }) {
+function Overview({ view, base }: { view: RoundView; base: string }) {
   const review = useReview();
   const { round, feature } = view;
   const reviews = view.reviews.filter((r) => r.state === "submitted");
@@ -305,6 +326,8 @@ function Overview({ view }: { view: RoundView }) {
         {round.planVersion} · {round.changes.length} changes on{" "}
         <span className="mono">{short(round.baseCommitId)}</span>
       </p>
+
+      <PlanSummary view={view} base={base} />
 
       {round.final && <FinalRound view={view} />}
 
@@ -437,5 +460,29 @@ function FinalRound({ view }: { view: RoundView }) {
         />
       </section>
     </>
+  );
+}
+
+/** How many of the plan's tasks the round's changes say they implement. */
+function PlanSummary({ view, base }: { view: RoundView; base: string }) {
+  const { data } = useApi<PlanView>(planPath(view));
+  const tasks = data?.coverage.phases.flatMap((p) => p.tasks) ?? [];
+  const done = tasks.filter((t) => t.changeIds.length > 0).length;
+  return (
+    <p className="plan-summary">
+      <Link to={`${base}/plan`}>Plan v{view.round.planVersion}</Link>
+      {data && (
+        <span className="muted">
+          {" · "}
+          {view.phases.length} phase{view.phases.length === 1 ? "" : "s"}
+          {tasks.length > 0 &&
+            (data.coverage.linked
+              ? ` · ${done} of ${tasks.length} tasks named by a change`
+              : ` · ${tasks.length} tasks, none named by a change yet`)}
+          {data.coverage.unknownTasks.length + data.coverage.unphased.length > 0 &&
+            " · some changes aren't in the plan"}
+        </span>
+      )}
+    </p>
   );
 }

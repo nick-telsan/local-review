@@ -12,6 +12,7 @@ import {
   deleteDraftComment,
   discardDraft,
   features,
+  planView,
   replyToThread,
   roundView,
   saveDraftSummary,
@@ -84,6 +85,7 @@ export function startUi(
       "/api/features/:slug/rounds/:n/changes/:change": api((req) =>
         changeView(ctx, req.params.slug!, req.params.n!, req.params.change!),
       ),
+      "/api/features/:slug/rounds/:n/plan": api((req) => planView(...round(req))),
       "/api/features/:slug/rounds/:n/since/:from": api((req) =>
         sinceView(...round(req), req.params.from!),
       ),

@@ -21,11 +21,13 @@ import type {
   Review,
   Round,
   Severity,
+  Task,
   Thread,
   ThreadStatus,
   Verdict,
 } from "../model.ts";
 import { type FileDiff, parsePatch } from "../patch.ts";
+import { parsePlan } from "../plan.ts";
 
 export interface RoundSummary {
   n: number;
@@ -84,6 +86,8 @@ export interface DraftCommentInput {
   lines?: [number, number];
   side?: "old" | "new";
   message?: boolean;
+  /** A phase: its combined diff with `path`, or the phase itself without. */
+  phase?: number;
   /** A final commit's group id (final rounds). */
   final?: string;
   /** The PR body (final rounds). */
@@ -143,6 +147,50 @@ export interface ChangeView {
   changeId: string;
   commitId: string;
   files: FileDiff[];
+}
+
+/** A plan version, with its markdown. */
+export interface PlanText {
+  plan: PlanVersion;
+  /** The whole file, frontmatter included. */
+  text: string;
+  /** The markdown after the frontmatter. */
+  body: string;
+}
+
+/** A task, and the changes that say they implement it (`Plan-Task: <id>`), in stack order. */
+export interface TaskCoverage {
+  task: Task;
+  changeIds: string[];
+}
+
+export interface PhaseCoverage {
+  phaseId: number;
+  tasks: TaskCoverage[];
+  /** The changes in the phase (by its bookmark), in stack order. */
+  changeIds: string[];
+  /** Changes in the phase that name no task. */
+  untasked: string[];
+}
+
+/** How the round's changes line up with its plan. */
+export interface PlanCoverage {
+  phases: PhaseCoverage[];
+  /** Changes naming a task the plan doesn't have. */
+  unknownTasks: { changeId: string; taskId: string }[];
+  /** Changes past the last phase's bookmark. */
+  unphased: string[];
+  /** Whether any change names a task: without that, there's no coverage to show. */
+  linked: boolean;
+}
+
+/** `GET /api/features/:slug/rounds/:n/plan` */
+export interface PlanView {
+  /** The version the round was taken against. */
+  version: number;
+  /** Every version, oldest first. */
+  versions: PlanText[];
+  coverage: PlanCoverage;
 }
 
 /** One change, compared with the earlier round (see `DiffChange`, which is `lr diff`'s). */
@@ -246,6 +294,51 @@ export async function changeView(
     ? await cached.text()
     : await ctx.jj.at(round.jjOpId).diffGit(change.commitId);
   return { changeId, commitId: change.commitId, files: parsePatch(patch) };
+}
+
+export async function planView(ctx: Context, slug: string, n: string): Promise<PlanView> {
+  const feature = getFeature(ctx, slug);
+  const round = ctx.round(feature, n === "latest" ? undefined : n);
+  const versions: PlanText[] = [];
+  for (let v = 1; v <= (feature.currentPlanVersion ?? 0); v++) {
+    const plan = ctx.store.getPlanVersion(slug, v)!;
+    const text = await Bun.file(join(ctx.featureDir(slug), plan.path)).text();
+    versions.push({ plan, text, body: parsePlan(text, slug).body });
+  }
+  const phases = ctx.store.getPlanVersion(slug, round.planVersion)!.phases;
+  return { version: round.planVersion, versions, coverage: coverage(round, phases) };
+}
+
+/** The task ids a change names in `Plan-Task` trailers (`1.1`, or several: `1.1, 1.2`). */
+function taskIds(change: Round["changes"][number]): string[] {
+  return change.trailers
+    .filter(([key]) => key.toLowerCase() === "plan-task")
+    .flatMap(([, value]) => value.split(/[\s,]+/))
+    .filter(Boolean);
+}
+
+function coverage(round: Round, phases: Phase[]): PlanCoverage {
+  const known = new Set(phases.flatMap((p) => p.tasks.map((t) => t.id)));
+  const named = round.changes.map((c) => ({ id: c.changeId, tasks: taskIds(c), phase: c.phaseId }));
+  return {
+    phases: phases.map((p) => {
+      const inPhase = named.filter((c) => c.phase === p.id);
+      return {
+        phaseId: p.id,
+        tasks: p.tasks.map((task) => ({
+          task,
+          changeIds: named.filter((c) => c.tasks.includes(task.id)).map((c) => c.id),
+        })),
+        changeIds: inPhase.map((c) => c.id),
+        untasked: inPhase.filter((c) => c.tasks.length === 0).map((c) => c.id),
+      };
+    }),
+    unknownTasks: named.flatMap((c) =>
+      c.tasks.filter((t) => !known.has(t)).map((taskId) => ({ changeId: c.id, taskId })),
+    ),
+    unphased: named.filter((c) => c.phase === null).map((c) => c.id),
+    linked: named.some((c) => c.tasks.length > 0),
+  };
 }
 
 // Rounds are snapshots, so comparing two never gives a different answer: keep recent ones.

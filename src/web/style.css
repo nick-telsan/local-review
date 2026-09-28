@@ -955,6 +955,172 @@ table.message-lines tr.line:first-child td.code {
   font-size: 12px;
 }
 
+/* The plan */
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.plan-head h1 {
+  margin: 0;
+}
+.plan-summary {
+  margin: 12px 0 0;
+}
+.phase-card {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.phase-card h3 {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.phase-card .bookmark {
+  margin-left: 0;
+}
+.done-when {
+  margin: 6px 0 0;
+}
+.tasks {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.task-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.task-mark {
+  width: 14px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--muted);
+}
+.task-mark.done {
+  color: var(--add-text);
+}
+.task-row.open .task-mark {
+  color: var(--warn);
+}
+.chips {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.change-chip {
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+}
+.change-chip:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+.phase-changes {
+  margin: 10px 0 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.not-in-plan {
+  border-color: var(--warn);
+}
+.plan-diff {
+  margin: 20px 0 0;
+}
+.plan-diff summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* Markdown */
+
+.markdown {
+  max-width: 820px;
+  overflow-wrap: anywhere;
+}
+.markdown h1 {
+  font-size: 20px;
+  margin: 20px 0 8px;
+}
+.markdown h2 {
+  font-size: 16px;
+  margin: 20px 0 8px;
+}
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 14px;
+  margin: 16px 0 6px;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre {
+  margin: 0 0 10px;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 24px;
+}
+.markdown li.task {
+  list-style: none;
+  margin-left: -18px;
+}
+.markdown li > ul,
+.markdown li > ol,
+.markdown li > p {
+  margin: 4px 0;
+}
+.markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.markdown .code-block {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--sunken);
+  overflow-x: auto;
+}
+.markdown .code-block code {
+  padding: 0;
+  background: none;
+}
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
 /* Since an earlier round */
 
 .since-bar {

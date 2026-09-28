@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { type DiffLine, type FileDiff, filePath } from "../patch.ts";
+import { type DiffHunk, type DiffLine, type FileDiff, filePath } from "../patch.ts";
 import type { DraftComment, Placement, ThreadView } from "../ui/api.ts";
 import { CommentForm } from "./CommentForm.tsx";
 import { DraftCard } from "./Draft.tsx";
@@ -228,5 +228,34 @@ export function FileDiffView({
         </>
       )}
     </section>
+  );
+}
+
+/** A diff to read, not comment on, like a message edit or a plan revision. */
+export function PlainDiff({ hunks }: { hunks: DiffHunk[] }) {
+  return (
+    <table className="diff plain-diff">
+      <tbody>
+        {hunks.map((h, i) => (
+          <Fragment key={`${h.oldStart}:${h.newStart}`}>
+            {i > 0 && (
+              <tr className="hunk-head">
+                <td>⋯</td>
+              </tr>
+            )}
+            {h.lines.map((l) => (
+              <tr key={`${l.oldLine ?? ""}:${l.newLine ?? ""}`} className={`line ${l.kind}`}>
+                <td className="code">
+                  <span className="sign">
+                    {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
+                  </span>
+                  {l.text}
+                </td>
+              </tr>
+            ))}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
   );
 }

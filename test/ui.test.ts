@@ -6,7 +6,14 @@ import type { ReplyOk } from "../src/commands/thread.ts";
 import type { UiOk } from "../src/commands/ui.ts";
 import { Context } from "../src/context.ts";
 import { repoDir } from "../src/paths.ts";
-import type { ChangeView, FeaturesOk, ReviewDraft, RoundView, SinceView } from "../src/ui/api.ts";
+import type {
+  ChangeView,
+  FeaturesOk,
+  PlanView,
+  ReviewDraft,
+  RoundView,
+  SinceView,
+} from "../src/ui/api.ts";
 import { POLL_MS, startUi, type UiServer } from "../src/ui/server.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
 import { lr, lrWithStdin } from "./lr.ts";
@@ -412,6 +419,52 @@ describe("drafting a review", () => {
     const res = await api(`${draftPath}/comments`, { method: "POST", body: "{" });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain("must be JSON");
+  });
+});
+
+describe("the plan", () => {
+  test("every version, and which changes say they implement which tasks", async () => {
+    // Round 1 names no tasks.
+    const one = await json<PlanView>("/features/feat/rounds/1/plan");
+    expect(one.version).toBe(1);
+    expect(one.versions.map((v) => [v.plan.version, v.body])).toEqual([[1, "# Plan\n\nBody.\n"]]);
+    expect(one.versions[0]!.text).toStartWith("---\nphases:");
+    expect(one.coverage.linked).toBe(false);
+
+    await repo.jj("describe", c1, "-m", "Add db\n\nPlan-Task: 1.1, 9.9");
+    await repo.jj("describe", "@", "-m", "Loose\n\nPlan-Task: 1.1\nplan-task: 1.2");
+    await repo.write("loose.ts", "l\n");
+    await repo.jj("new");
+    const v2 = TWO_PHASE_PLAN.replace("Body.", "Body, revised.");
+    expect((await lrWithStdin(repo, v2, "plan", "revise", "-F", "-")).code).toBe(0);
+    expect((await lr(repo, "review", "create")).code).toBe(0);
+
+    const two = await json<PlanView>("/features/feat/rounds/2/plan");
+    expect(two.version).toBe(2);
+    expect(two.versions.map((v) => [v.plan.version, v.plan.respondsToRound, v.body])).toEqual([
+      [1, null, "# Plan\n\nBody.\n"],
+      [2, 1, "# Plan\n\nBody, revised.\n"],
+    ]);
+    const loose = (await json<RoundView>("/features/feat/rounds/2")).round.changes[2]!.changeId;
+    expect(two.coverage).toEqual({
+      phases: [
+        {
+          phaseId: 1,
+          tasks: [
+            { task: { id: "1.1", title: "Add table" }, changeIds: [c1, loose] },
+            { task: { id: "1.2", title: "Backfill" }, changeIds: [loose] },
+          ],
+          changeIds: [c1],
+          untasked: [],
+        },
+        { phaseId: 2, tasks: [], changeIds: [c2], untasked: [c2] },
+      ],
+      unknownTasks: [{ changeId: c1, taskId: "9.9" }],
+      unphased: [loose],
+      linked: true,
+    });
+    // The earlier round keeps the plan it was taken against.
+    expect((await json<PlanView>("/features/feat/rounds/1/plan")).version).toBe(1);
   });
 });
 

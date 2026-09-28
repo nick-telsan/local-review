@@ -2,7 +2,7 @@ import type { ChangeSnapshot } from "../model.ts";
 import { type FileDiff, filePath } from "../patch.ts";
 import type { ChangeView, RoundView, SinceChange, ThreadView } from "../ui/api.ts";
 import { useApi } from "./api.ts";
-import { FileDiffView, onFile } from "./Diff.tsx";
+import { FileDiffView, onFile, PlainDiff } from "./Diff.tsx";
 import { AddComment, DraftCard, DraftList } from "./Draft.tsx";
 import { threadChange } from "./RoundPage.tsx";
 import { draftsOn, useReview } from "./review.tsx";
@@ -95,7 +95,7 @@ export function ChangePane({
         {compared?.message && since && (
           <div className="message-diff">
             <h3 className="muted">Edited since round {since.from}</h3>
-            <PlainDiff file={compared.message} />
+            <PlainDiff hunks={compared.message.hunks} />
           </div>
         )}
       </section>
@@ -197,27 +197,5 @@ function SinceNote({ change: c, from }: { change: SinceChange; from: number }) {
       {what}
       {notes.length > 0 && ` (${notes.join("; ")})`}
     </p>
-  );
-}
-
-/** A diff to read, not comment on, like a message edit. */
-function PlainDiff({ file }: { file: FileDiff }) {
-  return (
-    <table className="diff plain-diff">
-      <tbody>
-        {file.hunks.flatMap((h) =>
-          h.lines.map((l) => (
-            <tr key={`${l.oldLine ?? ""}:${l.newLine ?? ""}`} className={`line ${l.kind}`}>
-              <td className="code">
-                <span className="sign">
-                  {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
-                </span>
-                {l.text}
-              </td>
-            </tr>
-          )),
-        )}
-      </tbody>
-    </table>
   );
 }

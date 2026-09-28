@@ -7,12 +7,18 @@ import { ErrorBox, formatActor, Loading, Pill, timeAgo } from "./ui.tsx";
 export function App() {
   const path = usePath();
   const change = match("/f/:slug/r/:n/c/:change", path);
+  const plan = match("/f/:slug/r/:n/plan", path);
   const round = match("/f/:slug/r/:n", path) ?? match("/f/:slug", path);
-  const params = change ?? round;
+  const params = change ?? plan ?? round;
   return (
     <div className="app">
       {params ? (
-        <RoundPage slug={params.slug!} n={params.n ?? "latest"} change={change?.change ?? null} />
+        <RoundPage
+          slug={params.slug!}
+          n={params.n ?? "latest"}
+          change={change?.change ?? null}
+          plan={plan !== null}
+        />
       ) : (
         <Features />
       )}

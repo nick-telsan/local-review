@@ -141,8 +141,9 @@ interface PlanVersion {
 }
 ```
 
-Commits link to tasks through a jj trailer in the description: `Plan-Task: 1.1`. This is optional;
-the UI uses it to show plan-vs-implementation coverage. (Verified: `jj log -T trailers` works on
+Commits link to tasks through a jj trailer in the description: `Plan-Task: 1.1`. A change can name
+several (`Plan-Task: 1.1, 1.2`, or one trailer each; the key is matched without case). This is
+optional; the UI uses it to show plan-vs-implementation coverage (see Web UI). (Verified: `jj log -T trailers` works on
 jj 0.45.)
 
 ### Round (snapshot)
@@ -796,6 +797,9 @@ server-sent event stream when it moves. The page then refetches what it shows.
   reviews, and threads, each with a `placement`.
 - `GET /api/features/:slug/rounds/:n/changes/:change`: the change's diff, parsed into files, hunks,
   and lines, from the round's cached patch (or jj, if the cache is gone).
+- `GET /api/features/:slug/rounds/:n/plan`: every plan version with its text, which one the round
+  was taken against, and the round's coverage of it: each task with the changes naming it, each
+  phase's changes naming no task, task ids the plan doesn't have, and changes in no phase.
 - `GET /api/features/:slug/rounds/:n/since/:from`: what changed since an earlier round, change by
   change, as `lr diff` compares them. A changed change's interdiff is parsed into files, and a
   message edit is split out of them. Rounds are snapshots, so the server keeps recent comparisons.
@@ -815,6 +819,13 @@ commit's message, the PR body): click a line number, drag across several, or shi
 extend. The form follows the last picked line and keeps what's written; a suggestion that wasn't
 edited follows the pick. A final round shows each final commit's message and the PR body line by
 line, so they take comments like a change's message does.
+
+**The plan.** A round's plan page shows the plan version it was taken against, phase by phase:
+each task with the changes whose `Plan-Task` names it (or none), the phase's changes that name no
+task, and below, anything outside the plan. Phase comments go there. The body is rendered as
+markdown (a small built-in subset; text is never rendered as HTML). Other versions can be read,
+each with a line diff from the one before, but only the round's version shows coverage or takes
+comments, since those are on the round's phases.
 
 **Since an earlier round.** A round can show only what changed since an earlier one: by default
 the last round the actor reviewed (the round view's `lastReviewed`), else the one before. It's
