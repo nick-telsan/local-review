@@ -1,6 +1,7 @@
 // What the web UI reads. Types here are the UI's API; src/web/ imports them.
 import { join } from "node:path";
 import { refAt } from "../anchors.ts";
+import { compare, type DiffChange, type DiffOk, lastReviewedBefore } from "../commands/diff.ts";
 import { nextStep } from "../commands/status.ts";
 import {
   pickRound,
@@ -129,6 +130,8 @@ export interface RoundView {
   draft: ReviewDraft | null;
   /** Other rounds where the actor has a draft (e.g. one superseded while they wrote it). */
   otherDrafts: number[];
+  /** The latest earlier round the actor reviewed: what "since your last review" compares with. */
+  lastReviewed: number | null;
 }
 
 /** `GET /api/features/:slug/rounds/:n/changes/:changeId` */
@@ -136,6 +139,23 @@ export interface ChangeView {
   changeId: string;
   commitId: string;
   files: FileDiff[];
+}
+
+/** One change, compared with the earlier round (see `DiffChange`, which is `lr diff`'s). */
+export interface SinceChange extends Omit<DiffChange, "patch" | "files"> {
+  /**
+   * For a `changed` change: how its diff changed, as an interdiff. Its new side is the change's
+   * own new side, so those lines take comments; its old side is the earlier commit, rebased. Empty
+   * otherwise: an added change's diff (or one whose earlier commit is gone) is its whole diff.
+   */
+  files: FileDiff[];
+  /** How its message changed, as a diff of the two messages. */
+  message: FileDiff | null;
+}
+
+/** `GET /api/features/:slug/rounds/:n/since/:from`: what changed since an earlier round. */
+export interface SinceView extends Omit<DiffOk, "lastReviewed" | "changes"> {
+  changes: SinceChange[];
 }
 
 export function features(ctx: Context): FeaturesOk {
@@ -200,6 +220,7 @@ export function roundView(ctx: Context, slug: string, n: string): RoundView {
     threads,
     draft: ctx.store.getDraft<ReviewDraft>(slug, round.n, ctx.actor),
     otherDrafts: ctx.store.draftRounds(slug, ctx.actor).filter((r) => r !== round.n),
+    lastReviewed: lastReviewedBefore(ctx, feature, round.n)?.n ?? null,
   };
 }
 
@@ -221,6 +242,62 @@ export async function changeView(
     ? await cached.text()
     : await ctx.jj.at(round.jjOpId).diffGit(change.commitId);
   return { changeId, commitId: change.commitId, files: parsePatch(patch) };
+}
+
+// Rounds are snapshots, so comparing two never gives a different answer: keep recent ones.
+const comparisons = new Map<string, Promise<SinceView>>();
+const KEEP_COMPARISONS = 32;
+
+/** What changed in round `n` since round `from`, change by change, like `lr diff`. */
+export function sinceView(ctx: Context, slug: string, n: string, from: string): Promise<SinceView> {
+  const feature = getFeature(ctx, slug);
+  const to = ctx.round(feature, n === "latest" ? undefined : n);
+  const earlier = ctx.round(feature, from);
+  if (earlier.n >= to.n) throw new LrError(`round ${earlier.n} isn't earlier than round ${to.n}`);
+
+  // Op ids too, in case a purged feature's slug was reused.
+  const key = [ctx.jj.root, slug, earlier.n, earlier.jjOpId, to.n, to.jjOpId].join("\0");
+  let view = comparisons.get(key);
+  if (!view) {
+    view = compareRounds(ctx, earlier, to);
+    view.catch(() => comparisons.delete(key));
+    comparisons.set(key, view);
+    if (comparisons.size > KEEP_COMPARISONS) {
+      comparisons.delete(comparisons.keys().next().value!);
+    }
+  }
+  return view;
+}
+
+async function compareRounds(ctx: Context, from: Round, to: Round): Promise<SinceView> {
+  const changes = await compare(ctx.jj, from, to);
+  return {
+    from: from.n,
+    to: to.n,
+    baseMoved:
+      from.baseCommitId === to.baseCommitId
+        ? null
+        : { from: from.baseCommitId, to: to.baseCommitId },
+    changes: changes.map(({ patch, files: _, ...c }) => {
+      const { message, files } = splitMessage(patch);
+      const interdiff = c.status === "changed" && c.note === null;
+      return { ...c, files: interdiff ? files : [], message };
+    }),
+  };
+}
+
+/**
+ * `jj interdiff --git` shows a message edit as a file named `JJ-COMMIT-DESCRIPTION`, whose `---`
+ * line has no `a/` (a real file's always does). Take it out of the files.
+ */
+function splitMessage(patch: string): { message: FileDiff | null; files: FileDiff[] } {
+  const sections = patch.split(/^(?=diff --git )/m);
+  const isMessage = (s: string) => s.split("\n", 3)[1] === "--- JJ-COMMIT-DESCRIPTION";
+  const message = sections.find(isMessage);
+  return {
+    message: message ? parsePatch(message)[0]! : null,
+    files: parsePatch(sections.filter((s) => !isMessage(s)).join("")),
+  };
 }
 
 // ── Writes, all as `ctx.actor` ────────────────────────────────────────────────

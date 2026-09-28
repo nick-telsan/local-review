@@ -796,6 +796,9 @@ server-sent event stream when it moves. The page then refetches what it shows.
   reviews, and threads, each with a `placement`.
 - `GET /api/features/:slug/rounds/:n/changes/:change`: the change's diff, parsed into files, hunks,
   and lines, from the round's cached patch (or jj, if the cache is gone).
+- `GET /api/features/:slug/rounds/:n/since/:from`: what changed since an earlier round, change by
+  change, as `lr diff` compares them. A changed change's interdiff is parsed into files, and a
+  message edit is split out of them. Rounds are snapshots, so the server keeps recent comparisons.
 - `POST …/rounds/:n/draft/comments`, `PUT`/`DELETE …/draft/comments/:id`: the actor's draft comments,
   in review-file form (`change`, `path`, `lines`, `side`, `message`, `severity`, `body`,
   `suggestion`).
@@ -806,6 +809,16 @@ server-sent event stream when it moves. The page then refetches what it shows.
 
 Writes push `changed` to other open pages too, since the server's own writes don't move
 `data_version` for its own connection.
+
+**Since an earlier round.** A round can show only what changed since an earlier one: by default
+the last round the actor reviewed (the round view's `lastReviewed`), else the one before. It's
+`?since=<n>` in the address, and off unless asked for. The sidebar marks each change changed, new,
+or the same, with a changed change's stats taken from its interdiff, and lists the changes removed
+since. A changed change shows its interdiff and its message edit; a new one, and one whose earlier
+commit is gone, show their whole diff. An interdiff's new side is the change's own new side, so
+comments go on its new lines exactly as on the whole diff. Its old side is the earlier commit,
+rebased, so it takes no comments, and old-side comments aren't placed on it. A comment on lines an
+interdiff doesn't show is listed above its file; one on a file it doesn't show, with the change.
 
 **Which threads a round shows, and where.** The latest round shows the threads placed in it, every
 unsettled one, and any with activity in it. Outdated threads stay anchored in the round where they

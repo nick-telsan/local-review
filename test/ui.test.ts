@@ -6,7 +6,7 @@ import type { ReplyOk } from "../src/commands/thread.ts";
 import type { UiOk } from "../src/commands/ui.ts";
 import { Context } from "../src/context.ts";
 import { repoDir } from "../src/paths.ts";
-import type { ChangeView, FeaturesOk, ReviewDraft, RoundView } from "../src/ui/api.ts";
+import type { ChangeView, FeaturesOk, ReviewDraft, RoundView, SinceView } from "../src/ui/api.ts";
 import { POLL_MS, startUi, type UiServer } from "../src/ui/server.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
 import { lr } from "./lr.ts";
@@ -216,6 +216,76 @@ describe("the API", () => {
       const res = await api(path);
       expect(res.status).toBe(status);
       expect(((await res.json()) as { error: string }).error).toContain(message);
+    }
+  });
+});
+
+describe("since an earlier round", () => {
+  /** Round 2: c1's code and message edited, and a new change on top. */
+  async function revise(): Promise<string> {
+    await repo.write("db.ts", "a\nB\nc\nd\n");
+    // A real file with the name jj gives a message edit in an interdiff.
+    await repo.write("JJ-COMMIT-DESCRIPTION", "not a message\n");
+    await repo.jj("squash", "--into", c1);
+    await repo.jj("describe", c1, "-m", "Add the db\n\nWith a body.");
+    await repo.jj("new", c2, "-m", "Extra");
+    await repo.write("extra.ts", "e\n");
+    await repo.bookmark("feat/2-rotation", "@");
+    const extra = (await repo.jj("log", "--no-graph", "-r", "@", "-T", "change_id")).trim();
+    await repo.jj("new");
+    expect((await lr(repo, "review", "create")).code).toBe(0);
+    return extra;
+  }
+
+  test("each change's status, its interdiff, and its message edit apart from its files", async () => {
+    await review([{ change: c1, path: "db.ts", lines: [2, 2], body: "Capitalize." }]);
+    const extra = await revise();
+
+    expect((await json<RoundView>("/features/feat/rounds/latest")).lastReviewed).toBe(1);
+    expect((await json<RoundView>("/features/feat/rounds/1")).lastReviewed).toBeNull();
+
+    const since = await json<SinceView>("/features/feat/rounds/latest/since/1");
+    expect(since).toMatchObject({ from: 1, to: 2, baseMoved: null });
+    expect(since.changes.map((c) => [c.changeId, c.status])).toEqual([
+      [c1, "changed"],
+      [c2, "unchanged"],
+      [extra, "added"],
+    ]);
+    const [db, rotate, added] = since.changes;
+    expect(db!.messageChanged).toBe(true);
+    expect(db!.message!.hunks[0]!.lines.map((l) => [l.kind, l.text])).toEqual([
+      ["del", "Add db"],
+      ["add", "Add the db"],
+      ["context", ""],
+      ["context", "With a body."],
+    ]);
+    expect(db!.files.map((f) => [f.status, f.newPath])).toEqual([
+      ["added", "JJ-COMMIT-DESCRIPTION"],
+      ["modified", "db.ts"],
+    ]);
+    // The new side is the change's own: these lines take comments.
+    const lines = db!.files[1]!.hunks.flatMap((h) => h.lines);
+    expect(lines.filter((l) => l.kind === "add").map((l) => [l.newLine, l.text])).toEqual([
+      [2, "B"],
+      [4, "d"],
+    ]);
+    expect(rotate).toMatchObject({ files: [], message: null });
+    // An added change's diff is its whole diff, which the change view has.
+    expect(added).toMatchObject({ files: [], message: null, fromCommitId: null });
+
+    // Compared once, then remembered; the answer is the same.
+    expect(await json<SinceView>("/features/feat/rounds/2/since/1")).toEqual(since);
+  });
+
+  test("only an earlier round", async () => {
+    const cases = [
+      ["1", "round 1 isn't earlier than round 1"],
+      ["2", "no round 2 (latest is 1)"],
+    ];
+    for (const [from, message] of cases) {
+      const res = await api(`/features/feat/rounds/1/since/${from}`);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe(message!);
     }
   });
 });

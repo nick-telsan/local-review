@@ -926,6 +926,99 @@ tr.picked td.code {
   background: var(--accent-soft);
 }
 
+/* Since an earlier round */
+
+.since-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.segmented {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.segmented button {
+  border: none;
+  border-radius: 0;
+  padding: 4px 12px;
+}
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+.segmented button.chosen,
+.segmented button.chosen:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+select {
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+.since-mark {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.since-mark-changed {
+  color: var(--warn);
+}
+.since-mark-added {
+  color: var(--add-text);
+}
+.since-mark-unchanged,
+.since-mark-removed {
+  color: var(--muted);
+}
+.side-item.since-unchanged .change-subject,
+.side-item.since-removed .change-subject {
+  color: var(--muted);
+}
+.side-item.since-removed .change-subject {
+  text-decoration: line-through;
+}
+.since-note {
+  display: inline-block;
+  margin: 4px 0 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--sunken);
+}
+.since-note.since-changed {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.since-note.since-added {
+  background: var(--add-bg);
+  color: var(--add-text);
+}
+.diff-note {
+  margin-top: -4px;
+}
+.message-diff h3 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+.plain-diff {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
 @media (max-width: 800px) {
   .round-layout {
     grid-template-columns: minmax(0, 1fr);

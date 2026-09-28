@@ -91,20 +91,27 @@ function fromRound(
     return { from, lastReviewed: false };
   }
   if (to.n === 1) throw new LrError("round 1 is the first; there's no earlier round to compare");
-  const me = formatActor(ctx.actor);
-  for (let n = to.n - 1; n >= 1; n--) {
-    const reviewed = ctx.store
-      .listReviews(feature.slug, n)
-      .some((r) => r.state === "submitted" && formatActor(r.reviewer) === me);
-    if (reviewed) return { from: ctx.store.getRound(feature.slug, n)!, lastReviewed: true };
-  }
+  const last = lastReviewedBefore(ctx, feature, to.n);
+  if (last) return { from: last, lastReviewed: true };
   return { from: ctx.store.getRound(feature.slug, to.n - 1)!, lastReviewed: false };
+}
+
+/** The latest round before round `n` that the actor submitted a review of. */
+export function lastReviewedBefore(ctx: Context, feature: Feature, n: number): Round | null {
+  const me = formatActor(ctx.actor);
+  for (let i = n - 1; i >= 1; i--) {
+    const reviewed = ctx.store
+      .listReviews(feature.slug, i)
+      .some((r) => r.state === "submitted" && formatActor(r.reviewer) === me);
+    if (reviewed) return ctx.store.getRound(feature.slug, i)!;
+  }
+  return null;
 }
 
 const has = (round: Round, changeId: string) => round.changes.some((c) => c.changeId === changeId);
 
 /** Every change in `to` (in stack order), then the ones `from` had that are gone. */
-async function compare(jj: Jj, from: Round, to: Round): Promise<DiffChange[]> {
+export async function compare(jj: Jj, from: Round, to: Round): Promise<DiffChange[]> {
   const before = new Map(from.changes.map((c) => [c.changeId, c]));
   const kept = await Promise.all(to.changes.map((c) => compareOne(jj, before.get(c.changeId), c)));
 

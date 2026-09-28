@@ -6,6 +6,7 @@ import { AddComment, DraftList } from "./Draft.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { draftsOn, makeReview, ReviewContext, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
+import { type Since, SinceBar, SinceProvider, useSinceFor } from "./since.tsx";
 import { ThreadCard, ThreadList } from "./Thread.tsx";
 import {
   ActorName,
@@ -36,6 +37,7 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
   const { data, error } = useApi<RoundView>(
     `/features/${encodeURIComponent(slug)}/rounds/${encodeURIComponent(n)}`,
   );
+  const since = useSinceFor(data);
   if (error && !data) {
     return (
       <>
@@ -52,30 +54,33 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
 
   return (
     <ReviewContext.Provider value={makeReview(data)}>
-      <TopBar slug={slug} view={data} />
-      <div className="round-layout">
-        <Sidebar view={data} base={base} selected={change} />
-        <main className="round-main">
-          {!data.latest && (
-            <div className="banner">
-              This is round {data.round.n}; round {data.rounds.at(-1)!.n} is the latest. Threads
-              show where they were made in this round.{" "}
-              <Link to={`/f/${encodeURIComponent(slug)}`}>Go to the latest round</Link>
-            </div>
-          )}
-          <DraftBanners view={data} />
-          {change === null ? (
-            <Overview view={data} />
-          ) : selected ? (
-            <ChangePane view={data} change={selected} base={base} />
-          ) : (
-            <p className="empty">
-              Round {data.round.n} has no change {short(change)}.{" "}
-              <Link to={base}>Back to the round</Link>
-            </p>
-          )}
-        </main>
-      </div>
+      <SinceProvider value={since}>
+        <TopBar slug={slug} view={data} />
+        <div className="round-layout">
+          <Sidebar view={data} base={base} selected={change} since={since} />
+          <main className="round-main">
+            <SinceBar view={data} />
+            {!data.latest && (
+              <div className="banner">
+                This is round {data.round.n}; round {data.rounds.at(-1)!.n} is the latest. Threads
+                show where they were made in this round.{" "}
+                <Link to={`/f/${encodeURIComponent(slug)}`}>Go to the latest round</Link>
+              </div>
+            )}
+            <DraftBanners view={data} />
+            {change === null ? (
+              <Overview view={data} />
+            ) : selected ? (
+              <ChangePane view={data} change={selected} base={base} />
+            ) : (
+              <p className="empty">
+                Round {data.round.n} has no change {short(change)}.{" "}
+                <Link to={base}>Back to the round</Link>
+              </p>
+            )}
+          </main>
+        </div>
+      </SinceProvider>
     </ReviewContext.Provider>
   );
 }
@@ -162,15 +167,22 @@ function Sidebar({
   view,
   base,
   selected,
+  since,
 }: {
   view: RoundView;
   base: string;
   selected: string | null;
+  since: Since | null;
 }) {
   const general = view.threads.filter((t) => threadChange(t) === null && isUnsettled(t)).length;
+  const href = since?.href ?? ((path: string) => path);
+  const compared = (id: string) => (since?.on ? since.change(id) : undefined);
+  const removed = since?.on
+    ? (since.view?.changes.filter((c) => c.status === "removed") ?? [])
+    : [];
   return (
     <nav className="sidebar" aria-label="Stack">
-      <Link to={base} className={`side-item overview${selected === null ? " current" : ""}`}>
+      <Link to={href(base)} className={`side-item overview${selected === null ? " current" : ""}`}>
         <span>Overview</span>
         {general > 0 && <span className="count">{general}</span>}
       </Link>
@@ -190,11 +202,22 @@ function Sidebar({
               (t) => threadChange(t) === c.changeId && isUnsettled(t),
             ).length;
             const checks = view.checks.filter((r) => r.changeId === c.changeId);
+            const then = compared(c.changeId);
+            // Since an earlier round, a changed change's stats are its interdiff's.
+            const stats =
+              then?.status === "changed" && then.note === null
+                ? {
+                    added: then.files.reduce((n, f) => n + f.added, 0),
+                    removed: then.files.reduce((n, f) => n + f.removed, 0),
+                  }
+                : c.stats;
             return (
               <Link
                 key={c.changeId}
-                to={`${base}/c/${c.changeId}`}
-                className={`side-item change${selected === c.changeId ? " current" : ""}`}
+                to={href(`${base}/c/${c.changeId}`)}
+                className={`side-item change${selected === c.changeId ? " current" : ""}${
+                  then ? ` since-${then.status}` : ""
+                }`}
               >
                 <span className="change-subject">
                   {c.conflicted && (
@@ -206,8 +229,9 @@ function Sidebar({
                 </span>
                 <span className="change-meta">
                   <span className="mono muted">{short(c.changeId)}</span>
-                  <span className="stat-add">+{c.stats.added}</span>
-                  <span className="stat-del">−{c.stats.removed}</span>
+                  {then && <SinceMark status={then.status} />}
+                  <span className="stat-add">+{stats.added}</span>
+                  <span className="stat-del">−{stats.removed}</span>
                   {checks.map((r) => (
                     <CheckIcon key={r.id} run={r} />
                   ))}
@@ -218,8 +242,35 @@ function Sidebar({
           })}
         </section>
       ))}
+      {removed.length > 0 && (
+        <section className="side-phase">
+          <h3>Removed since round {since!.from}</h3>
+          {removed.map((c) => (
+            <div key={c.changeId} className="side-item change since-removed">
+              <span className="change-subject">{subject(c.description)}</span>
+              <span className="change-meta">
+                <span className="mono muted">{short(c.changeId)}</span>
+                <span className="muted">
+                  {c.squashedInto ? `squashed into ${short(c.squashedInto)}` : "abandoned"}
+                </span>
+              </span>
+            </div>
+          ))}
+        </section>
+      )}
     </nav>
   );
+}
+
+const SINCE_MARK = {
+  changed: "changed",
+  added: "new",
+  unchanged: "same",
+  removed: "removed",
+} as const;
+
+function SinceMark({ status }: { status: keyof typeof SINCE_MARK }) {
+  return <span className={`since-mark since-mark-${status}`}>{SINCE_MARK[status]}</span>;
 }
 
 function Overview({ view }: { view: RoundView }) {

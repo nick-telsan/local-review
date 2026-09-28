@@ -11,6 +11,12 @@ const COLLAPSE_LINES = 800;
 
 type Side = "old" | "new";
 type OnLines = Extract<Placement, { on: "line" }>;
+
+const BOTH: Side[] = ["old", "new"];
+
+/** Whether a line comment is on `file`, by the path on its side. */
+export const onFile = (file: FileDiff, p: OnLines) =>
+  p.path === (p.side === "new" ? file.newPath : file.oldPath);
 type Item =
   | { kind: "thread"; thread: ThreadView; at: OnLines }
   | { kind: "draft"; draft: DraftComment; at: OnLines };
@@ -32,10 +38,16 @@ export function FileDiffView({
   file,
   change,
   threads,
+  sides = BOTH,
 }: {
   file: FileDiff;
   change: string;
   threads: ThreadView[];
+  /**
+   * The sides whose line numbers are the change's own diff's, so comments show and go there. An
+   * interdiff's old side is an earlier commit, so there it's only the new side.
+   */
+  sides?: Side[];
 }) {
   const review = useReview();
   const path = filePath(file);
@@ -51,14 +63,13 @@ export function FileDiffView({
     return () => removeEventListener("mouseup", stop);
   }, [dragging]);
 
-  const onThisFile = (p: OnLines) => p.path === (p.side === "new" ? file.newPath : file.oldPath);
   const items: Item[] = [
     ...threads.flatMap((t): Item[] =>
-      t.placement.on === "line" && onThisFile(t.placement)
+      t.placement.on === "line" && onFile(file, t.placement)
         ? [{ kind: "thread", thread: t, at: t.placement }]
         : [],
     ),
-    ...draftsOn(review.drafts, "line", (p) => p.changeId === change && onThisFile(p)).map(
+    ...draftsOn(review.drafts, "line", (p) => p.changeId === change && onFile(file, p)).map(
       (d): Item => ({ kind: "draft", draft: d, at: d.placement }),
     ),
   ];
@@ -68,7 +79,9 @@ export function FileDiffView({
   const after = new Map<DiffLine, Item[]>();
   const elsewhere: Item[] = [];
   for (const item of items) {
-    const row = rows.find((l) => lineOn(l, item.at.side) === item.at.lines[1]);
+    const row =
+      sides.includes(item.at.side) &&
+      rows.find((l) => lineOn(l, item.at.side) === item.at.lines[1]);
     if (row) after.set(row, [...(after.get(row) ?? []), item]);
     else elsewhere.push(item);
   }
@@ -87,7 +100,9 @@ export function FileDiffView({
   };
   const numberCell = (l: DiffLine, side: Side) => {
     const n = lineOn(l, side);
-    if (n === null || !review.canReview) return <td className="num">{n ?? ""}</td>;
+    if (n === null || !review.canReview || !sides.includes(side)) {
+      return <td className="num">{n ?? ""}</td>;
+    }
     return (
       <td className="num">
         <button
@@ -120,6 +135,7 @@ export function FileDiffView({
   };
   const isCommented = (l: DiffLine) =>
     items.some((i) => {
+      if (!sides.includes(i.at.side)) return false;
       const n = lineOn(l, i.at.side);
       return n !== null && n >= i.at.lines[0] && n <= i.at.lines[1];
     });
@@ -128,9 +144,9 @@ export function FileDiffView({
       ? rows.find((l) => lineOn(l, selection.side) === picked[1])
       : undefined;
 
-  const renderItem = (item: Item) =>
+  const renderItem = (item: Item, showAnchor = false) =>
     item.kind === "thread" ? (
-      <ThreadCard key={`t${item.thread.id}`} thread={item.thread} />
+      <ThreadCard key={`t${item.thread.id}`} thread={item.thread} showAnchor={showAnchor} />
     ) : (
       <DraftCard
         key={item.draft.id}
@@ -172,7 +188,9 @@ export function FileDiffView({
             <p className="file-note">Empty file.</p>
           )}
           {elsewhere.length > 0 && (
-            <div className="thread-list outside">{elsewhere.map(renderItem)}</div>
+            <div className="thread-list outside">
+              {elsewhere.map((item) => renderItem(item, true))}
+            </div>
           )}
           {file.hunks.length > 0 && (
             <table className="diff">
@@ -213,7 +231,9 @@ export function FileDiffView({
                         {after.get(l) && (
                           <tr className="inline-threads">
                             <td colSpan={3}>
-                              <div className="thread-list">{after.get(l)!.map(renderItem)}</div>
+                              <div className="thread-list">
+                                {after.get(l)!.map((item) => renderItem(item))}
+                              </div>
                             </td>
                           </tr>
                         )}

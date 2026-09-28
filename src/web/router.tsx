@@ -15,6 +15,12 @@ export function usePath(): string {
   return useSyncExternalStore(subscribe, () => location.pathname);
 }
 
+/** A query parameter of the current address, or null. */
+export function useParam(name: string): string | null {
+  const search = useSyncExternalStore(subscribe, () => location.search);
+  return new URLSearchParams(search).get(name);
+}
+
 export function navigate(to: string, opts: { replace?: boolean } = {}): void {
   if (opts.replace) history.replaceState(null, "", to);
   else history.pushState(null, "", to);

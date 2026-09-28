@@ -15,6 +15,7 @@ import {
   replyToThread,
   roundView,
   saveDraftSummary,
+  sinceView,
   submitDraft,
   updateDraftComment,
 } from "./api.ts";
@@ -82,6 +83,9 @@ export function startUi(
       ),
       "/api/features/:slug/rounds/:n/changes/:change": api((req) =>
         changeView(ctx, req.params.slug!, req.params.n!, req.params.change!),
+      ),
+      "/api/features/:slug/rounds/:n/since/:from": api((req) =>
+        sinceView(...round(req), req.params.from!),
       ),
       "/api/features/:slug/rounds/:n/draft": {
         PUT: write<{ verdict: Verdict | null; body: string | null }>((req, b) =>
