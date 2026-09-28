@@ -144,7 +144,8 @@ interface PlanVersion {
 Commits link to tasks through a jj trailer in the description: `Plan-Task: 1.1`. A change can name
 several (`Plan-Task: 1.1, 1.2`, or one trailer each; the key is matched without case). This is
 optional; the UI uses it to show plan-vs-implementation coverage (see Web UI). Once any change in a
-code round names a task, `lr status` and `lr handoff` list the **plan gaps**: tasks no change names,
+code round names a task, `lr review create` (as warnings; they never block a round), `lr status`,
+and `lr handoff` list the **plan gaps**: tasks no change names,
 task ids the plan doesn't have, and changes that name no task. Until then there's nothing to
 measure, so they say nothing. Final rounds skip it, since their code is already approved. (Verified: `jj log -T trailers` works on
 jj 0.45.)

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { join } from "node:path";
+import type { ReviewCreateOk } from "../src/commands/review.ts";
 import type { StatusOk } from "../src/commands/status.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
 import { lr, lrJson } from "./lr.ts";
@@ -57,4 +58,21 @@ test("no gaps until some change names a task", async () => {
   const { data } = await lrJson<StatusOk>(repo, "status");
   expect(data.planGaps).toEqual([]);
   expect((await lr(repo, "status")).out).not.toContain("Plan gaps");
+});
+
+test("lr review create warns about them, without blocking the round", async () => {
+  await repo.jj("describe", c2, "-m", "Rotate\n\nPlan-Task: 1.2");
+  await repo.jj("new", c1, "-m", "Unrelated\n\nPlan-Task: 1.1");
+  await repo.write("x.ts", "x\n");
+  await repo.jj("rebase", "-s", c2, "-d", "@");
+  await repo.jj("new", "feat/2-rotation");
+
+  const r = await lr(repo, "review", "create");
+  expect(r.code).toBe(0);
+  expect(r.err).toContain(`warning: plan gap: ${c1.slice(0, 8)} "Add table" names task 7.7`);
+  expect(r.out).toContain("Plan gaps: 1 (the warnings above;");
+
+  const { data } = await lrJson<ReviewCreateOk>(repo, "review", "create");
+  expect(data.planGaps).toEqual([{ kind: "unknown_task", changeId: c1, taskId: "7.7" }]);
+  expect(data.warnings.filter((w) => w.startsWith("plan gap:"))).toHaveLength(1);
 });

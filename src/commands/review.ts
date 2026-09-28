@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type CheckResult, checkTargets, runChecks } from "../checks.ts";
 import { loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
+import { describeGap, type PlanGap, planGaps } from "../coverage.ts";
 import { LrError } from "../errors.ts";
 import type { ChangeSnapshot, CheckRun, Phase, Round, RoundStatus } from "../model.ts";
 import { type ReanchoredThread, reanchorThreads } from "../reanchor.ts";
@@ -19,7 +20,10 @@ export interface ReviewCreateOk {
   checks: CheckResultJson[];
   /** Unsettled threads from earlier rounds, carried onto this one. */
   reanchored: ReanchoredThread[];
+  /** Includes each plan gap, described. */
   warnings: string[];
+  /** Where the stack and the plan's tasks don't line up (see `planGaps`). */
+  planGaps: PlanGap[];
 }
 
 /** `lr review create --json` output when checks or conflicts blocked the round. */
@@ -28,6 +32,7 @@ export interface ReviewCreateBlocked {
   conflicted: string[];
   checks: CheckResultJson[];
   warnings: string[];
+  planGaps: PlanGap[];
 }
 
 /**
@@ -45,7 +50,13 @@ export async function reviewCreate(
   }
   const plan = ctx.currentPlan(feature);
   const snap = await takeSnapshot(ctx.jj, feature.baseRevset, plan.phases);
-  for (const w of snap.warnings) progress(ctx, `warning: ${w}`);
+  // Gaps between the plan's tasks and the changes' Plan-Task trailers warn; they don't block.
+  const gaps = planGaps(snap, plan.phases);
+  const warnings = [
+    ...snap.warnings,
+    ...gaps.map((g) => `plan gap: ${describeGap(g, snap.changes)}`),
+  ];
+  for (const w of warnings) progress(ctx, `warning: ${w}`);
 
   let results: CheckResult[] = [];
   if (opts.skipChecks) progress(ctx, "skipping checks (--skip-checks)");
@@ -60,7 +71,8 @@ export async function reviewCreate(
       heading: "No round opened: fix these and run `lr review create` again.",
       conflicted,
       results,
-      warnings: snap.warnings,
+      warnings,
+      planGaps: gaps,
     });
   }
 
@@ -100,7 +112,8 @@ export async function reviewCreate(
     replaced,
     checks: checksJson,
     reanchored,
-    warnings: snap.warnings,
+    warnings,
+    planGaps: gaps,
   };
   ctx.print(json, [
     `Round ${round.n} opened for ${feature.slug} (plan v${plan.version}, base ${snap.baseCommitId.slice(0, 8)})`,
@@ -111,6 +124,12 @@ export async function reviewCreate(
       : `Checks: ${passed.length}/${results.length} passed${cached ? ` (${cached} cached)` : ""}` +
         (failed.length ? ` — ${failed.length} failing (--allow-failing)` : ""),
     ...(reanchored.length ? [`Threads: ${describeReanchored(reanchored)}`] : []),
+    ...(gaps.length
+      ? [
+          `Plan gaps: ${gaps.length} (the warnings above; \`lr status\` lists them too). Implement ` +
+            "the task, add a `Plan-Task: <id>` trailer, or drop it in a revised plan.",
+        ]
+      : []),
   ]);
   return 0;
 }
@@ -149,7 +168,13 @@ export async function checkStack(
 /** Report a round that conflicts or failing checks kept from opening. Returns the exit code, 1. */
 export function printBlocked(
   ctx: Context,
-  b: { heading: string; conflicted: ChangeSnapshot[]; results: CheckResult[]; warnings: string[] },
+  b: {
+    heading: string;
+    conflicted: ChangeSnapshot[];
+    results: CheckResult[];
+    warnings: string[];
+    planGaps?: PlanGap[];
+  },
 ): number {
   const failed = b.results.filter((r) => r.run.status !== "pass");
   ctx.print(
@@ -158,6 +183,7 @@ export function printBlocked(
       conflicted: b.conflicted.map((c) => c.changeId),
       checks: b.results.map(checkJson),
       warnings: b.warnings,
+      planGaps: b.planGaps ?? [],
     } satisfies ReviewCreateBlocked,
     [
       b.heading,

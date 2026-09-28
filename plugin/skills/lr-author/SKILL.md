@@ -90,7 +90,10 @@ the stack, runs the checks in `.local-review.toml`, and opens round N.
   change is conflicted. Fix it in the change where it belongs, confirm with
   `lr check <change> --check <name>`, and run it again. Only use `--allow-failing` if the
   developer says so.
-- Read the warnings: undescribed changes, changes outside every phase, phases with no changes.
+- Read the warnings: undescribed changes, changes outside every phase, phases with no changes,
+  and plan gaps (a task no change names, a task id the plan doesn't have, a change naming no task).
+  Fix a gap by adding the missing `Plan-Task` trailer, doing the task, or dropping it in a revised
+  plan; the round opens either way.
 - It also carries open threads from earlier rounds onto the new stack, and reports which moved or
   went outdated.
 

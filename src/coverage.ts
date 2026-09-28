@@ -42,7 +42,10 @@ export function taskIds(change: ChangeSnapshot): string[] {
     .filter(Boolean);
 }
 
-export function coverage(round: Round, phases: Phase[]): PlanCoverage {
+/** A round, or a snapshot about to become one. */
+type Stack = Pick<Round, "changes">;
+
+export function coverage(round: Stack, phases: Phase[]): PlanCoverage {
   const known = new Set(phases.flatMap((p) => p.tasks.map((t) => t.id)));
   const named = round.changes.map((c) => ({ id: c.changeId, tasks: taskIds(c), phase: c.phaseId }));
   return {
@@ -70,7 +73,7 @@ export function coverage(round: Round, phases: Phase[]): PlanCoverage {
  * Tasks no change names, task ids the plan doesn't have, and changes that name no task; none
  * until some change names a task. (Changes in no phase are reported by `lr review create`.)
  */
-export function planGaps(round: Round, phases: Phase[]): PlanGap[] {
+export function planGaps(round: Stack, phases: Phase[]): PlanGap[] {
   const c = coverage(round, phases);
   if (!c.linked) return [];
   return [

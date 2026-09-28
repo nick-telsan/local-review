@@ -323,6 +323,8 @@ export async function finalRoundCreate(ctx: Context): Promise<number> {
     checks,
     reanchored,
     warnings,
+    // The approved code is what's squashed, so its plan gaps were settled in code rounds.
+    planGaps: [],
   };
   ctx.print(json, [
     `Final round ${round.n} opened for ${slug}: ${s.round.changes.length} changes from round ` +
