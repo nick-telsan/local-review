@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type CheckSettings, checkTargets, runChecks } from "../src/checks.ts";
 import type { CheckConfig } from "../src/config.ts";
@@ -162,6 +162,59 @@ describe("runChecks", () => {
     expect(again.results.map((r) => r.run.status)).toEqual(["fail"]);
   });
 
+  const lockFile = () => join(repo.tmp, "feature", "workspaces", "checks.lock");
+
+  describe("the checks workspace lock", () => {
+    test("a second run waits for the first, then reuses what it passed", async () => {
+      const started = join(repo.tmp, "started");
+      const go = join(repo.tmp, "go");
+      const config: CheckSettings = {
+        setup: null,
+        setupKillAfterMs: 1000,
+        checks: [
+          {
+            name: "slow",
+            run: `echo x >> ${started}; while [ ! -f ${go} ]; do sleep 0.05; done`,
+            at: "tip",
+            timeoutMs: 10_000,
+            killAfterMs: 1000,
+          },
+        ],
+      };
+      const first = run(config);
+      while (!existsSync(started)) await Bun.sleep(20);
+      const second = run(config);
+      while (!lines.some((l) => l.startsWith("waiting for another lr"))) await Bun.sleep(20);
+      expect(lines.find((l) => l.startsWith("waiting"))).toMatch(
+        new RegExp(
+          `^waiting for another lr \\(pid ${process.pid}, running checks since .+\\) to finish with the checks workspace$`,
+        ),
+      );
+
+      await Bun.write(go, "");
+      const [a, b] = await Promise.all([first, second]);
+      expect(a.results.map((r) => [r.run.status, r.cached])).toEqual([["pass", false]]);
+      expect(b.results.map((r) => [r.run.id, r.cached])).toEqual([[a.results[0]!.run.id, true]]);
+      expect(await Bun.file(started).text()).toBe("x\n");
+      expect(existsSync(lockFile())).toBe(false);
+    });
+
+    test("a lock left by a process that's gone is taken over", async () => {
+      const dead = Bun.spawn(["true"]);
+      await dead.exited;
+      mkdirSync(join(repo.tmp, "feature", "workspaces"), { recursive: true });
+      writeFileSync(lockFile(), JSON.stringify({ pid: dead.pid, startedAt: "then" }));
+      const r = await run({
+        setup: null,
+        setupKillAfterMs: 1000,
+        checks: [check("c", "tip")],
+      });
+      expect(r.results.map((x) => x.run.status)).toEqual(["pass"]);
+      expect(lines.some((l) => l.startsWith("waiting"))).toBe(false);
+      expect(existsSync(lockFile())).toBe(false);
+    });
+  });
+
   describe("stopping checks", () => {
     // Each command records its process group (its shell's pid), to check nothing outlives it.
     const pgidFile = () => join(repo.tmp, "pgid");
@@ -245,6 +298,7 @@ describe("runChecks", () => {
       };
       expect(row.status).toBe("error");
       expect(await Bun.file(row.log_path).text()).toContain("[lr] interrupted by SIGINT");
+      expect(existsSync(lockFile())).toBe(false);
       // lr stops listening once the check is over.
       expect(process.listenerCount("SIGINT")).toBe(listeners);
     });

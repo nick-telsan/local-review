@@ -1,4 +1,12 @@
-import { closeSync, existsSync, mkdirSync, openSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { type CheckConfig, formatDuration, type RepoConfig } from "./config.ts";
 
@@ -64,15 +72,36 @@ export async function runChecks(opts: {
   mkdirSync(logDir, { recursive: true });
 
   const results: CheckResult[] = [];
-  const toRun: CheckTarget[] = [];
-  for (const t of targets) {
-    const cached =
-      !opts.rerun && store.findPassingCheck(slug, t.check.name, t.check.run, t.change.commitId);
-    if (cached) results.push({ run: cached, cached: true });
-    else toRun.push(t);
-  }
+  /** The targets with no passing run to reuse; the rest go straight into `results`. */
+  const uncached = (from: CheckTarget[]) =>
+    from.filter((t) => {
+      const cached =
+        !opts.rerun && store.findPassingCheck(slug, t.check.name, t.check.run, t.change.commitId);
+      if (cached) results.push({ run: cached, cached: true });
+      return !cached;
+    });
+  let toRun = uncached(targets);
   if (toRun.length === 0) return results;
 
+  const unlock = await lockWorkspace(checkWorkspaceDir(featureDir), log);
+  try {
+    // A run we waited for may have passed some of these.
+    toRun = uncached(toRun);
+    if (toRun.length === 0) return results;
+    await runUncached(opts, toRun, results, logDir);
+  } finally {
+    unlock();
+  }
+  return results;
+}
+
+async function runUncached(
+  opts: Parameters<typeof runChecks>[0],
+  toRun: CheckTarget[],
+  results: CheckResult[],
+  logDir: string,
+): Promise<void> {
+  const { store, slug, featureDir, log } = opts;
   // Group by commit so each commit is checked out (and set up) once.
   const byCommit = new Map<string, CheckTarget[]>();
   for (const t of toRun)
@@ -150,7 +179,71 @@ export async function runChecks(opts: {
   } finally {
     await ws.clean();
   }
-  return results;
+}
+
+/** How often a run waiting for the checks workspace looks again. */
+const LOCK_POLL_MS = 500;
+
+interface LockHolder {
+  pid: number;
+  startedAt: string;
+}
+
+/**
+ * Take the lock on a feature's checks workspace, waiting while another lr process holds it: two
+ * runs in one workspace would check out over each other. A lock whose process is gone (killed, or
+ * crashed) is taken over. Returns the release function.
+ */
+async function lockWorkspace(dir: string, log: (line: string) => void): Promise<() => void> {
+  const path = `${dir}.lock`;
+  mkdirSync(join(dir, ".."), { recursive: true });
+  const mine: LockHolder = { pid: process.pid, startedAt: new Date().toISOString() };
+  let waiting = false;
+  for (;;) {
+    try {
+      const fd = openSync(path, "wx");
+      writeSync(fd, JSON.stringify(mine));
+      closeSync(fd);
+      return () => rmSync(path, { force: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    const text = readLock(path);
+    const holder = text && (JSON.parse(text) as LockHolder);
+    if (holder && !processAlive(holder.pid)) {
+      // Only remove the lock we judged stale, not one another waiter has since taken.
+      if (readLock(path) === text) rmSync(path, { force: true });
+      continue;
+    }
+    if (!waiting && holder) {
+      log(
+        `waiting for another lr (pid ${holder.pid}, running checks since ` +
+          `${new Date(holder.startedAt).toLocaleTimeString()}) to finish with the checks workspace`,
+      );
+      waiting = true;
+    }
+    await Bun.sleep(LOCK_POLL_MS);
+  }
+}
+
+/** The lock file's contents; null if it's gone, or just created and not yet written. */
+function readLock(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8") || null;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM: it exists, but belongs to someone else.
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /** Stop the round: the developer asked lr to stop, so it exits the way an interrupted shell does. */

@@ -42,6 +42,7 @@ plan ──► implement ──► lr review create ──► round N ──► 
       final/messages/<group>.md       # final commit message drafts
       final/pr.md                     # PR body draft
       workspaces/checks/              # jj workspace `lr-<feature>-checks`, where checks run
+      workspaces/checks.lock          # held while a process runs checks there
 <repo>/.local-review.toml             # team-shareable: checks, bookmark naming, squash defaults
 ```
 
@@ -260,6 +261,12 @@ in their environment.
 
 If a check fails, or a change is conflicted (conflicts propagate to descendants), no round is
 opened. The runs are still recorded, so their logs are available for the fix.
+
+One process runs checks in a feature's workspace at a time, since two would check out over each
+other. While one does, it holds `workspaces/checks.lock` (created exclusively, with its pid). A
+second run says whose turn it is and waits, then looks at the cache again, so it reuses what the
+first run passed. A lock whose process is gone (killed, or crashed) is taken over. Runs served
+entirely from the cache don't need the workspace, and don't wait.
 
 `lr check` runs checks by hand. By default it checks the stack as it is now (even before the phase
 bookmarks exist), with the same targets `lr review create` would use, so an author can confirm a
