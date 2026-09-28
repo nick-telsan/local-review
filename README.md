@@ -10,7 +10,8 @@ squashed into its final shape and handed off as a PR.
 
 > **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
 > handoff, threaded replies, comments that follow the code from round to round, finalization
-> (squashing and the PR body), and a Claude Code plugin. The UI is next. See [the design](docs/design/data-model.md).
+> (squashing and the PR body), and a Claude Code plugin. The web UI (`lr ui`) shows rounds, diffs,
+> and threads, and updates live; commenting from it is next. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -31,6 +32,9 @@ To track your checkout instead of a build, put a shim named `lr` on your `PATH`:
 exec bun /path/to/local-review/src/bin.ts "$@"
 ```
 
+The shim runs whichever `bun` resolves where you run `lr`, which with asdf may not be the pinned one
+outside this repo. `lr ui` needs Bun 1.4.2 or later, and says so if it gets an older one.
+
 ```sh
 lr feature start auth-refresh --base 'trunk()'
 lr plan submit -F plan.md          # markdown with a `phases:` frontmatter block
@@ -46,6 +50,7 @@ lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads (--notes: the author's notes)
 lr diff                            # what changed since your last review, change by change
 lr status
+lr ui                              # the review UI in your browser, live as agents work
 lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 
 # once you've approved with nothing open:

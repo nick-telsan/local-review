@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { resolveHuman } from "./actor.ts";
 import { check } from "./commands/check.ts";
 import { diff } from "./commands/diff.ts";
 import { featureAbandon, featureClean, featureList, featureStart } from "./commands/feature.ts";
@@ -20,6 +21,7 @@ import { reviewCreate } from "./commands/review.ts";
 import { status } from "./commands/status.ts";
 import { reviewSubmit } from "./commands/submit.ts";
 import { type ReplyAction, reply, threads } from "./commands/thread.ts";
+import { ui } from "./commands/ui.ts";
 import { Context, type Io } from "./context.ts";
 import { LrError } from "./errors.ts";
 
@@ -55,6 +57,7 @@ Usage:
   lr final apply                  squash the stack as approved in the final round
   lr rebase [--onto <revset>]     rebase the stack onto its base (--onto: a new base)
   lr status
+  lr ui [--port <n>] [--no-open]  the review UI in your browser (Ctrl-C stops it)
   lr repo relink [<old path>]    bring review history along after the repo moved
   lr hook ${HOOK_EVENTS.join("|")}
                                   Claude Code hook handlers (hook JSON on stdin)
@@ -218,6 +221,14 @@ const COMMANDS: Record<string, Handler> = {
   status: async (ctx, args) => {
     parse(args, {});
     return status(ctx);
+  },
+  ui: async (ctx, args) => {
+    const { values } = parse(args, { port: { type: "string" }, "no-open": { type: "boolean" } });
+    return ui(ctx.with({ actor: resolveHuman(values.as) }), {
+      port: values.port,
+      open: !values["no-open"],
+      dev: process.env.LR_UI_DEV === "1",
+    });
   },
 };
 

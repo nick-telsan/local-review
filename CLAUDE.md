@@ -1,6 +1,6 @@
 # local-review
 
-A local code review tool for agentic development: a CLI (`lr`) now, a desktop UI later. The
+A local code review tool for agentic development: a CLI (`lr`), and a web UI it serves (`lr ui`). The
 design lives in `docs/design/data-model.md`. Read it before changing the model, and update it in
 the same change when behavior diverges from it.
 
@@ -25,7 +25,8 @@ the why isn't obvious.
 `bunfig.toml` pins exact versions and refuses packages published less than 3 days ago. Don't
 bypass either (no `--minimum-release-age=0`, no `^` ranges). Avoid runtime dependencies:
 `bun:sqlite`, `Bun.YAML`, `Bun.TOML`, `Bun.spawn`, and `node:util` `parseArgs` cover what we
-need so far.
+need so far. The exception is React (`react`, `react-dom`), which only the web UI uses and which is
+bundled into the page.
 
 ## Code conventions
 
@@ -44,6 +45,14 @@ need so far.
 - `noUncheckedIndexedAccess` is on and Biome's `noNonNullAssertion` is off. Use `!` where an
   index is known to exist; don't paper over it with `?.`.
 - Biome formats: 2 spaces, 100 columns, double quotes.
+
+## Web UI
+
+`web/` is the React app `lr ui` serves; `src/ui/` is its server and API. The API's types live in
+`src/ui/api.ts` and `web/` imports them (type-only, plus `src/patch.ts`, which is shared and must
+stay free of Bun APIs). `web/` has its own `tsconfig.json` (DOM, JSX), and `bun run typecheck`
+checks both. Tests cover the server and API against real repos; the React code has no tests yet, so
+check UI changes in a browser. With `LR_UI_DEV=1`, `lr ui` serves the page with hot reloading.
 
 ## Claude Code plugin
 

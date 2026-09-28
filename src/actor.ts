@@ -38,3 +38,20 @@ export function formatActor(actor: Actor): string {
 export function parseActor(text: string): Actor {
   return parseSpec(text);
 }
+
+/**
+ * Who `lr ui` acts as. A person uses it, so it never defaults to the coding agent whose shell
+ * started it: `--as` or $LR_ACTOR if either names a human, else the OS user.
+ */
+export function resolveHuman(flag: string | undefined): Actor {
+  const spec = flag ?? process.env.LR_ACTOR;
+  const actor: Actor = spec
+    ? parseSpec(spec)
+    : { kind: "human", name: process.env.USER ?? "unknown" };
+  if (actor.kind !== "human") {
+    throw new LrError(
+      `the UI acts for a person, not ${formatActor(actor)}; pass --as human:<name>`,
+    );
+  }
+  return actor;
+}

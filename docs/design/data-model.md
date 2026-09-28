@@ -701,6 +701,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr feature abandon [<slug>]`                                            | human          | give up on a feature (history and commits are kept)                           |
 | `lr feature clean [<slug>…] [--purge]`                                   | anyone; `--purge`: human | tidy up after finished features (see below)                         |
 | `lr repo relink [<old path>]`                                            | developer      | bring review history along after the repo moves (see below)                   |
+| `lr ui [--port <n>] [--no-open]`                                         | developer      | the review UI in the browser (see Web UI)                                     |
 
 `lr feature clean` tidies up after done and abandoned features: the ones named, or all of them. It
 refuses a feature that's still active.
@@ -756,6 +757,45 @@ it's tested.
 
 Session records live in `<repo-key>/sessions/<session id>.json`.
 
+### Web UI
+
+`lr ui` serves a React app and a JSON API on 127.0.0.1 and opens the browser (`$BROWSER`, else the
+platform's opener) at the current feature's latest round. It runs until Ctrl-C. One per repo: it records its pid, port, and token in
+`<repo-key>/ui.json` (mode 0600), and a second `lr ui` opens that one instead of starting another.
+The standalone binary embeds the page; from source, Bun bundles `web/index.html` at startup.
+
+It acts as a person: `--as` or `$LR_ACTOR` if either names a human, else the OS user, never the
+coding agent whose shell started it. For now it only reads.
+
+**Security.** The API can read reviews (and will write them), so any page open in the browser must
+not reach it. The page itself is public, since it's the same bundle for everyone. The API needs a
+random token, sent as `Authorization: Bearer`. The link `lr ui` prints carries it as `?t=`; the page
+keeps it in `localStorage` (per port) and takes it out of the address bar. Only the event stream
+accepts it in the URL, since `EventSource` can't send headers. The server also refuses a `Host` other
+than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding), and non-GET requests from another
+`Origin`.
+
+**Live updates.** The CLI and agents write to the same SQLite database from other processes. While a
+page is connected, the server checks `PRAGMA data_version` every 500ms, and sends `changed` on a
+server-sent event stream when it moves. The page then refetches what it shows.
+
+**API** (types in `src/ui/api.ts`):
+
+- `GET /api/features`: the features, each with its latest round and unsettled thread count.
+- `GET /api/features/:slug/rounds/:n` (`n` may be `latest`): the round, its plan's phases, checks,
+  reviews, and threads, each with a `placement`.
+- `GET /api/features/:slug/rounds/:n/changes/:change`: the change's diff, parsed into files, hunks,
+  and lines, from the round's cached patch (or jj, if the cache is gone).
+
+**Which threads a round shows, and where.** The latest round shows the threads placed in it, every
+unsettled one, and any with activity in it. Outdated threads stay anchored in the round where they
+were last found, so these can point into an earlier round. An earlier round shows the threads made
+in it, where they were made; where they were carried later isn't recorded. A code comment goes
+inline only in the diff it was made in: the change's own diff. Comments made in a phase's or the
+stack's combined diff have that diff's line numbers, and outdated ones point at code that has
+changed, so both are listed with their change, with their snippet. A thread whose change has left
+the stack is listed on the round's overview.
+
 ## 6. Decisions log
 
 - **jj only.** Colocated git repos should work, but only through jj.
@@ -787,6 +827,11 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
   than the OS user. Your own `!` commands inside Claude Code therefore need `--as <you>`.
 - **The Stop reminder only fires for changes made in the session:** a session that didn't touch the
   stack isn't asked about it.
+- **The UI is a local web app, not a desktop app (yet).** All of lr is TypeScript on Bun, so a desktop
+  shell would still run lr as a sidecar, and add signing, packaging, and updates. The browser gives
+  deep links and tabs for free. A desktop wrapper can come later around the same server.
+- **The UI's diff view is our own,** not a library's: lr's model (a stack of changes, threads that
+  move between rounds, comments on messages) doesn't fit general-purpose diff components.
 - **Re-anchoring state is relative to where the comment was made,** not the previous round, so
   "moved" always means "not where you left it". Outdated threads keep trying from their last good
   round rather than being dropped.

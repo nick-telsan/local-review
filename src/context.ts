@@ -43,6 +43,18 @@ export class Context {
     );
   }
 
+  /** The same repo and store, with some settings changed (e.g. the UI server's per-request contexts). */
+  with(opts: { actor?: Actor; json?: boolean; io?: Io; feature?: string }): Context {
+    return new Context(
+      this.jj,
+      this.store,
+      opts.actor ?? this.actor,
+      opts.json ?? this.json,
+      opts.io ?? this.io,
+      opts.feature ?? this.featureFlag,
+    );
+  }
+
   close(): void {
     this.store.close();
   }

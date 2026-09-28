@@ -11,15 +11,21 @@
   "scripts": {
     "lr": "bun src/bin.ts",
     "test": "bun test --coverage",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "lint": "biome check .",
     "fix": "biome check --write .",
     "check": "bun run lint && bun run typecheck && bun run test",
-    "build": "bun build src/bin.ts --compile --outfile dist/lr"
+    "build": "NODE_ENV=production bun build src/bin.ts --compile --minify --outfile dist/lr"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/bun": "1.4.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   }
 }
