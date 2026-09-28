@@ -241,7 +241,12 @@ export class Jj {
    * The line hunks that turn `path` at `from` into `path` at `to`, with no context lines. Parsed
    * from `--git` output, which user config can't reshape.
    */
-  async hunks(from: string, to: string, path: string): Promise<Hunk[]> {
+  /**
+   * The hunks of `path` between two revisions, following it to `newPath` if it was renamed. Both
+   * paths must be one file's before and after, or jj would show two diffs.
+   */
+  async hunks(from: string, to: string, path: string, newPath = path): Promise<Hunk[]> {
+    const paths = newPath === path ? [path] : [path, newPath];
     const out = await this.run([
       "diff",
       "--git",
@@ -250,7 +255,7 @@ export class Jj {
       from,
       "--to",
       to,
-      rootFile(path),
+      ...paths.map(rootFile),
     ]);
     return [...out.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)].map((m) => ({
       oldStart: Number(m[1]),
@@ -258,6 +263,25 @@ export class Jj {
       newStart: Number(m[3]),
       newCount: Number(m[4] ?? 1),
     }));
+  }
+
+  /** Files renamed between two revisions (as jj detects them, edits included): old → new path. */
+  async renames(from: string, to: string): Promise<Map<string, string>> {
+    const out = await this.run([
+      "diff",
+      "--from",
+      from,
+      "--to",
+      to,
+      "-T",
+      'if(status == "renamed", "[" ++ json(source.path()) ++ "," ++ json(target.path()) ++ "]\n")',
+    ]);
+    const renames = new Map<string, string>();
+    for (const line of out.split("\n").filter((l) => l.length > 0)) {
+      const [source, target] = JSON.parse(line) as [string, string];
+      renames.set(source, target);
+    }
+    return renames;
   }
 
   /** The change id that last touched each line of `path` at `rev` (index 0 = line 1). */

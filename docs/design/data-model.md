@@ -444,11 +444,15 @@ Per anchor kind:
    not an interdiff, on purpose: if trunk edited the lines, the anchor really did go stale.
 3. **Snippet fallback.** When the diff touches the lines (or the old commit can't be read, e.g.
    after `jj util gc`), an exact match of `snippet` that appears exactly once in the new file places
-   the thread. That catches code that moved within its file. Renamed files aren't followed yet.
-4. **Commit messages.** A whole-message comment goes outdated if the message changes at all. A
+   the thread. That catches code that moved within its file.
+4. **Renamed files** are followed when jj reports the rename between the old and new revision. jj
+   detects renames by content similarity, so a file that was also edited heavily reads as a delete
+   and an add, and its threads go `outdated`. A followed thread gets the new path, and its lines
+   are mapped (or found by snippet) in the renamed file as above.
+5. **Commit messages.** A whole-message comment goes outdated if the message changes at all. A
    line-range comment stays put if those lines are unchanged, or moves to a unique exact match of
    its snippet.
-5. **Phases** go outdated when the current plan no longer has them. **General** threads are always
+6. **Phases** go outdated when the current plan no longer has them. **General** threads are always
    current.
 
 Notes follow the same process, and resolved notes are carried too, because reviewers read them

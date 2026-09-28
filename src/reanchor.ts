@@ -85,6 +85,7 @@ export async function reanchorThreads(input: {
 export class Reanchorer {
   private readonly jj: Jj;
   private successors: Promise<Map<string, ChangeSnapshot>> | null = null;
+  private readonly renamed = new Map<string, Promise<Map<string, string>>>();
 
   constructor(
     jj: Jj,
@@ -179,28 +180,52 @@ export class Reanchorer {
 
     const oldRev = refCommit(from, a.side === "new" ? a.view.to : a.view.from);
     const newRev = refCommit(this.to, a.side === "new" ? view.to : view.from);
+    const path = (await this.renames(oldRev, newRev)).get(a.path) ?? a.path;
     const lines =
-      (await this.mapLines(oldRev, newRev, a.path, a.lines)) ??
-      (await this.findSnippet(newRev, a.path, a.snippet));
+      (await this.mapLines(oldRev, newRev, a.path, path, a.lines)) ??
+      (await this.findSnippet(newRev, path, a.snippet));
     if (!lines) return null;
 
     const owner = (await this.change(a.changeId, from)) ?? end;
-    return { ...a, view, changeId: owner.changeId, commitId: owner.commitId, lines };
+    return { ...a, view, changeId: owner.changeId, commitId: owner.commitId, path, lines };
   }
 
-  /** Map lines through the diff between two revisions; null if the diff touches them. */
+  /** Files renamed between two revisions (old path → new), fetched once per pair. */
+  private renames(oldRev: string, newRev: string): Promise<Map<string, string>> {
+    const key = `${oldRev}:${newRev}`;
+    let found = this.renamed.get(key);
+    if (!found) {
+      found =
+        oldRev === newRev
+          ? Promise.resolve(new Map())
+          : this.gone(this.jj.renames(oldRev, newRev), new Map());
+      this.renamed.set(key, found);
+    }
+    return found;
+  }
+
+  /**
+   * Map lines through the diff between two revisions (from `path` to `newPath`, if the file was
+   * renamed); null if the diff touches them.
+   */
   private async mapLines(
     oldRev: string,
     newRev: string,
     path: string,
+    newPath: string,
     lines: [number, number],
   ): Promise<[number, number] | null> {
     if (oldRev === newRev) return lines;
+    const hunks = await this.gone(this.jj.hunks(oldRev, newRev, path, newPath), null);
+    return hunks && mapRange(hunks, lines);
+  }
+
+  /** `read`, or `fallback` if the old commit is gone for good (e.g. after `jj util gc`). */
+  private async gone<T, F>(read: Promise<T>, fallback: F): Promise<T | F> {
     try {
-      return mapRange(await this.jj.hunks(oldRev, newRev, path), lines);
+      return await read;
     } catch (e) {
-      // The old commit can be gone for good (e.g. after `jj util gc`).
-      if (e instanceof LrError) return null;
+      if (e instanceof LrError) return fallback;
       throw e;
     }
   }

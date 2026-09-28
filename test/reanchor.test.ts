@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ReviewCreateOk } from "../src/commands/review.ts";
 import type { ThreadsOk } from "../src/commands/thread.ts";
@@ -141,6 +142,59 @@ describe("re-anchoring at lr review create", () => {
     await amend(c2, { "rotate.ts": swapped });
     expect(states(await nextRound())[1]).toBe("moved");
     expect(code(await thread(1)).lines).toEqual([2, 2]);
+  });
+
+  describe("renamed files", () => {
+    /** Rename rotate.ts in c2, with new contents. */
+    async function rename(to: string, content: string): Promise<void> {
+      rmSync(join(repo.root, "rotate.ts"));
+      await amend(c2, { [to]: content });
+    }
+
+    test("threads follow the file, edits included", async () => {
+      await rename("src/rotation.ts", `// rotation\n${ROTATE}`);
+      expect(states(await nextRound())[1]).toBe("moved");
+      const t1 = await thread(1);
+      expect(code(t1)).toMatchObject({ path: "src/rotation.ts", lines: [7, 7], changeId: c2 });
+      expect(t1.originalAnchor).toMatchObject({ path: "rotate.ts", lines: [6, 6] });
+      expect((await lr(repo, "threads")).out).toContain(`src/rotation.ts:7 @${c2.slice(0, 8)}`);
+    });
+
+    test("a renamed file with the commented lines edited is outdated", async () => {
+      await rename("rotation.ts", ROTATE.replace("return 2", "return 3"));
+      expect(states(await nextRound())[1]).toBe("outdated");
+      expect(code(await thread(1)).path).toBe("rotate.ts");
+    });
+
+    test("code that moved within a renamed file is found by its snippet", async () => {
+      // The diff touches line 6, but its text now appears once, further down.
+      await rename(
+        "rotation.ts",
+        ROTATE.replace(
+          "  return 2;\n}\n",
+          "  return 2 + 0;\n}\n\nfunction two() {\n  return 2;\n}\n",
+        ),
+      );
+      expect(states(await nextRound())[1]).toBe("moved");
+      expect(code(await thread(1))).toMatchObject({ path: "rotation.ts", lines: [10, 10] });
+    });
+
+    test("a rewrite too big for jj to call it a rename outdates the thread", async () => {
+      await rename(
+        "rotation.ts",
+        "function keep() {\n  return 2;\n}\n\nfunction rotate() {\n  return 1;\n}\n",
+      );
+      expect(states(await nextRound())[1]).toBe("outdated");
+    });
+
+    test("a later change renaming the file leaves earlier changes' threads alone", async () => {
+      await repo.jj("edit", c3);
+      rmSync(join(repo.root, "rotate.ts"));
+      await repo.write("rotation.ts", ROTATE);
+      await repo.jj("new");
+      expect(states(await nextRound())[1]).toBe("current");
+      expect(code(await thread(1)).path).toBe("rotate.ts");
+    });
   });
 
   test("a squashed change carries its threads into the change it joined", async () => {
