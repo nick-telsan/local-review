@@ -44,55 +44,24 @@ export async function reviewCreate(
     throw new LrError(`feature "${feature.slug}" is ${feature.status}`);
   }
   const plan = ctx.currentPlan(feature);
-  const config = await loadRepoConfig(ctx.jj.root);
-  const progress = (line: string) => {
-    if (!ctx.json) ctx.io.err(line);
-  };
-
   const snap = await takeSnapshot(ctx.jj, feature.baseRevset, plan.phases);
-  for (const w of snap.warnings) progress(`warning: ${w}`);
+  for (const w of snap.warnings) progress(ctx, `warning: ${w}`);
 
   let results: CheckResult[] = [];
-  if (opts.skipChecks) {
-    progress("skipping checks (--skip-checks)");
-  } else if (config.checks.length === 0) {
-    progress("no checks configured (add [[checks]] to .local-review.toml)");
-  } else {
-    const targets = checkTargets(config.checks, snap.changes, plan.phases);
-    results = await runChecks({
-      jj: ctx.jj,
-      store: ctx.store,
-      slug: feature.slug,
-      featureDir: ctx.featureDir(feature.slug),
-      config,
-      targets,
-      trigger: "auto",
-      log: progress,
-    });
-  }
+  if (opts.skipChecks) progress(ctx, "skipping checks (--skip-checks)");
+  else results = await checkStack(ctx, feature.slug, snap.changes, plan.phases);
 
   const conflicted = snap.changes.filter((c) => c.conflicted);
   const failed = results.filter((r) => r.run.status !== "pass");
-  const checksJson: CheckResultJson[] = results.map((r) => ({ ...r.run, cached: r.cached }));
+  const checksJson = results.map(checkJson);
 
   if ((failed.length > 0 || conflicted.length > 0) && !opts.allowFailing) {
-    ctx.print(
-      {
-        ok: false,
-        conflicted: conflicted.map((c) => c.changeId),
-        checks: checksJson,
-        warnings: snap.warnings,
-      } satisfies ReviewCreateBlocked,
-      [
-        "No round opened: fix these and run `lr review create` again.",
-        ...conflicted.map((c) => `  conflicted: ${label(c)}`),
-        ...failed.map(
-          (r) =>
-            `  ${r.run.status}: ${r.run.check} @ ${r.run.changeId.slice(0, 8)}  log: ${r.run.logPath}`,
-        ),
-      ],
-    );
-    return 1;
+    return printBlocked(ctx, {
+      heading: "No round opened: fix these and run `lr review create` again.",
+      conflicted,
+      results,
+      warnings: snap.warnings,
+    });
   }
 
   // Read patches at the pinned operation before committing anything to the store.
@@ -143,6 +112,62 @@ export async function reviewCreate(
     ...(reanchored.length ? [`Threads: ${describeReanchored(reanchored)}`] : []),
   ]);
   return 0;
+}
+
+export const checkJson = (r: CheckResult): CheckResultJson => ({ ...r.run, cached: r.cached });
+
+/** A progress line on stderr, unless the output is JSON. */
+function progress(ctx: Context, line: string): void {
+  if (!ctx.json) ctx.io.err(line);
+}
+
+/** Run the repo's checks on a stack, reusing passing runs of the same command at the same commit. */
+export async function checkStack(
+  ctx: Context,
+  slug: string,
+  changes: ChangeSnapshot[],
+  phases: Phase[],
+): Promise<CheckResult[]> {
+  const config = await loadRepoConfig(ctx.jj.root);
+  if (config.checks.length === 0) {
+    progress(ctx, "no checks configured (add [[checks]] to .local-review.toml)");
+    return [];
+  }
+  return runChecks({
+    jj: ctx.jj,
+    store: ctx.store,
+    slug,
+    featureDir: ctx.featureDir(slug),
+    config,
+    targets: checkTargets(config.checks, changes, phases),
+    trigger: "auto",
+    log: (line) => progress(ctx, line),
+  });
+}
+
+/** Report a round that conflicts or failing checks kept from opening. Returns the exit code, 1. */
+export function printBlocked(
+  ctx: Context,
+  b: { heading: string; conflicted: ChangeSnapshot[]; results: CheckResult[]; warnings: string[] },
+): number {
+  const failed = b.results.filter((r) => r.run.status !== "pass");
+  ctx.print(
+    {
+      ok: false,
+      conflicted: b.conflicted.map((c) => c.changeId),
+      checks: b.results.map(checkJson),
+      warnings: b.warnings,
+    } satisfies ReviewCreateBlocked,
+    [
+      b.heading,
+      ...b.conflicted.map((c) => `  conflicted: ${label(c)}`),
+      ...failed.map(
+        (r) =>
+          `  ${r.run.status}: ${r.run.check} @ ${r.run.changeId.slice(0, 8)}  log: ${r.run.logPath}`,
+      ),
+    ],
+  );
+  return 1;
 }
 
 /** e.g. `2 current, 1 moved (#3), 1 outdated (#5)`. */

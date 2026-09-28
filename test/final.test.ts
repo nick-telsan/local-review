@@ -189,7 +189,7 @@ describe("lr review create --final", () => {
     await repo.write("rotate.ts", "export const x = 1;\n");
     await repo.jj("squash", "--into", c3);
     expect((await lr(repo, "review", "create", "--final")).err).toContain(
-      "the stack changed since round 1 was approved",
+      `the code changed since round 1 was approved (${c3.slice(0, 8)}'s diff changed in rotate.ts)`,
     );
   });
 
@@ -391,7 +391,7 @@ describe("lr final apply", () => {
     await repo.write("rotate.ts", "export const y = 2;\n");
     await repo.jj("squash", "--into", c3);
     expect((await lr(repo, "final", "apply")).err).toContain(
-      "the stack changed since final round 2",
+      `the code changed since final round 2 (${c3.slice(0, 8)}'s diff changed in rotate.ts)`,
     );
   });
 

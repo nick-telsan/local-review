@@ -54,7 +54,11 @@ On a later round, start with the threads the author replied to and the changes t
 
 ## 3. Settle earlier threads
 
-For each thread **you** raised that the author marked `addressed`, check the fix in this round:
+For each thread **you** raised that the author marked `addressed`, check the fix in this round.
+For a thread on code or a message, `originalAnchor.commitId` in `lr threads --json` is the change as
+you commented on it. `jj interdiff --git --from <that commit> --to <its commitId in this round>` shows
+what the author changed in it since. Use interdiff rather than `jj diff`, which would also show
+everything that landed on the base if the stack was rebased.
 
 ```sh
 lr reply <id> --resolve --as agent:claude-review                       # fixed

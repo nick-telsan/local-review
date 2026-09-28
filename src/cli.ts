@@ -11,6 +11,7 @@ import {
 import { handoff } from "./commands/handoff.ts";
 import { HOOK_EVENTS, hook } from "./commands/hook.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
+import { rebase } from "./commands/rebase.ts";
 import { reviewCreate } from "./commands/review.ts";
 import { status } from "./commands/status.ts";
 import { reviewSubmit } from "./commands/submit.ts";
@@ -39,6 +40,7 @@ Usage:
   lr final cut <change> [--remove]
                                   start a new final commit at a change, splitting its phase
   lr final apply                  squash the stack as approved in the final round
+  lr rebase [--onto <revset>]     rebase the stack onto its base (--onto: a new base)
   lr status
   lr hook ${HOOK_EVENTS.join("|")}
                                   Claude Code hook handlers (hook JSON on stdin)
@@ -88,7 +90,8 @@ const COMMANDS: Record<string, Handler> = {
     if (values.final) {
       if (values["allow-failing"] || values["skip-checks"]) {
         throw new LrError(
-          "--final reuses the approved round's checks; drop --allow-failing/--skip-checks",
+          "--final reuses the approved round's checks (rerunning them after a rebase), so it " +
+            "takes no --allow-failing/--skip-checks",
         );
       }
       return finalRoundCreate(ctx);
@@ -158,6 +161,10 @@ const COMMANDS: Record<string, Handler> = {
   "final apply": async (ctx, args) => {
     parse(args, {});
     return finalApply(ctx);
+  },
+  rebase: async (ctx, args) => {
+    const { values } = parse(args, { onto: { type: "string" } });
+    return rebase(ctx, { onto: values.onto });
   },
   status: async (ctx, args) => {
     parse(args, {});

@@ -156,6 +156,21 @@ export class Jj {
     return this.run(["diff", "--git", "--from", from, "--to", to]);
   }
 
+  /**
+   * The files whose patch differs between `from` and `to`: `from` is rebased onto `to`'s parent
+   * before comparing, so what a rebase brought in doesn't count. Messages don't count either. A
+   * change that conflicts the same way in both comes out empty.
+   */
+  async interdiffFiles(from: string, to: string): Promise<string[]> {
+    const out = await this.run(["interdiff", "--name-only", "--from", from, "--to", to]);
+    return out.split("\n").filter((l) => l.length > 0);
+  }
+
+  /** Rebase `source` and all its descendants onto `onto`. */
+  async rebase(source: string, onto: string): Promise<void> {
+    await this.run(["rebase", "--source", source, "--onto", onto]);
+  }
+
   /** Squash `from` (change ids) into `into`, giving the result `message`. */
   async squash(from: string[], into: string, message: string): Promise<void> {
     await this.run(["squash", "--from", from.join("|"), "--into", into, "-m", message]);

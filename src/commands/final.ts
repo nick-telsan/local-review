@@ -13,8 +13,15 @@ import {
 } from "../final.ts";
 import type { Feature, FinalSnapshot, Phase, Round } from "../model.ts";
 import { reanchorThreads } from "../reanchor.ts";
-import { takeSnapshot } from "../snapshot.ts";
-import { describeReanchored, type ReviewCreateOk } from "./review.ts";
+import { codeChanges, type Snapshot, takeSnapshot } from "../snapshot.ts";
+import {
+  type CheckResultJson,
+  checkJson,
+  checkStack,
+  describeReanchored,
+  printBlocked,
+  type ReviewCreateOk,
+} from "./review.ts";
 
 /** Where finalization stands: the approved code round and how it groups into final commits. */
 interface FinalState {
@@ -224,15 +231,18 @@ export async function finalCut(
 
 /**
  * Open a final round: freeze the squash groups, their messages, and the PR body for review. The
- * stack must be exactly what a human approved, with every draft written and no thread open.
+ * stack must have the code a human approved (a clean rebase is fine), with every draft written
+ * and no thread open.
  */
 export async function finalRoundCreate(ctx: Context): Promise<number> {
   const s = loadFinal(ctx);
   const slug = s.feature.slug;
   const snap = await takeSnapshot(ctx.jj, s.feature.baseRevset, s.phases);
-  if (stackCommits(snap) !== stackCommits(s.round)) {
+  const changed = await codeChanges(ctx.jj, s.round.changes, snap.changes);
+  if (changed.length) {
     throw new LrError(
-      `the stack changed since round ${s.round.n} was approved; open a code round with \`lr review create\``,
+      `the code changed since round ${s.round.n} was approved (${changed.join("; ")}); open a ` +
+        "code round with `lr review create`",
     );
   }
   const threads = ctx.store.listThreads(slug);
@@ -259,12 +269,33 @@ export async function finalRoundCreate(ctx: Context): Promise<number> {
     })),
     prBody: prBody!,
   };
-  const checks = ctx.store.roundChecks(slug, s.round.n);
+  const warnings: string[] = [];
+  let checks: CheckResultJson[] = ctx.store
+    .roundChecks(slug, s.round.n)
+    .map((c) => ({ ...c, cached: true }));
+  if (rewritten(snap, s.round)) {
+    const results = await checkStack(ctx, slug, snap.changes, s.phases);
+    if (results.some((r) => r.run.status !== "pass")) {
+      return printBlocked(ctx, {
+        heading:
+          "No final round opened: checks fail on the rebased stack. Fix them and open a code " +
+          "round with `lr review create`.",
+        conflicted: [],
+        results,
+        warnings: snap.warnings,
+      });
+    }
+    checks = results.map(checkJson);
+    warnings.push(
+      `the stack was rebased since round ${s.round.n} was approved; the code is the same, and ` +
+        "the checks ran on the new commits",
+    );
+  }
   const { round, replaced } = ctx.store.createRound(slug, {
     jjOpId: snap.jjOpId,
     planVersion: s.round.planVersion,
-    baseCommitId: s.round.baseCommitId,
-    changes: s.round.changes,
+    baseCommitId: snap.baseCommitId,
+    changes: snap.changes,
     checkRunIds: checks.map((c) => c.id),
     createdBy: ctx.actor,
     final,
@@ -278,14 +309,14 @@ export async function finalRoundCreate(ctx: Context): Promise<number> {
   });
 
   const addressed = threads.filter((t) => t.status === "addressed").map((t) => `#${t.id}`);
-  const warnings = addressed.length
-    ? [`${addressed.join(", ")} marked addressed, still waiting on their reviewers`]
-    : [];
+  if (addressed.length) {
+    warnings.push(`${addressed.join(", ")} marked addressed, still waiting on their reviewers`);
+  }
   const json: ReviewCreateOk = {
     ok: true,
     round,
     replaced,
-    checks: checks.map((c) => ({ ...c, cached: true })),
+    checks,
     reanchored,
     warnings,
   };
@@ -311,6 +342,8 @@ export interface FinalApplyOk {
   round: number;
   /** Undo point: `jj op restore <opBefore>` puts the stack back. */
   opBefore: string;
+  /** The stack was rebased after the final round, so the checks ran again first. */
+  rebased: boolean;
   opAfter: string;
   commits: {
     groupId: string;
@@ -325,8 +358,8 @@ export interface FinalApplyOk {
 
 /**
  * Squash the stack into the final commits a human approved: each group into its last change
- * (which keeps its change id and bookmarks), with the approved message. Checks that the result has
- * exactly the approved tree, and restores the jj operation from before if anything goes wrong.
+ * (which keeps its change id and bookmarks), with the approved message. Checks that the result ends
+ * in the tree it started from, and restores the jj operation from before if anything goes wrong.
  */
 export async function finalApply(ctx: Context): Promise<number> {
   const feature = ctx.feature();
@@ -354,10 +387,29 @@ export async function finalApply(ctx: Context): Promise<number> {
   }
   const phases = ctx.store.getPlanVersion(feature.slug, round.planVersion)!.phases;
   const snap = await takeSnapshot(ctx.jj, feature.baseRevset, phases);
-  if (stackCommits(snap) !== stackCommits(round)) {
+  const codeChanged = await codeChanges(ctx.jj, round.changes, snap.changes);
+  if (codeChanged.length) {
     throw new LrError(
-      `the stack changed since final round ${round.n}; review it again with \`lr review create\``,
+      `the code changed since final round ${round.n} (${codeChanged.join("; ")}); review it again ` +
+        "with `lr review create`",
     );
+  }
+  const rebased = rewritten(snap, round);
+  if (rebased) {
+    const failed = (await checkStack(ctx, feature.slug, snap.changes, phases)).filter(
+      (r) => r.run.status !== "pass",
+    );
+    if (failed.length) {
+      throw new LrError(
+        "checks fail on the rebased stack, so nothing was applied:\n" +
+          failed
+            .map(
+              (r) =>
+                `  ${r.run.status}: ${r.run.check} @ ${short(r.run.changeId)}  log: ${r.run.logPath}`,
+            )
+            .join("\n"),
+      );
+    }
   }
 
   const opBefore = snap.jjOpId;
@@ -368,9 +420,9 @@ export async function finalApply(ctx: Context): Promise<number> {
       if (g.changeIds.length > 1) await ctx.jj.squash(g.changeIds.slice(0, -1), into, g.message);
       else await ctx.jj.describe(into, g.message);
     }
-    // Squashing only regroups the changes, so the end result must match what was approved.
-    if (await ctx.jj.diffBetween(round.changes.at(-1)!.commitId, tops.at(-1)!)) {
-      throw new LrError("the squashed stack doesn't end in the approved tree");
+    // Squashing only regroups the changes, so the stack must end in the same tree.
+    if (await ctx.jj.diffBetween(snap.changes.at(-1)!.commitId, tops.at(-1)!)) {
+      throw new LrError("the squashed stack doesn't end in the tree it started from");
     }
   } catch (e) {
     await ctx.jj.restoreOp(opBefore);
@@ -386,6 +438,7 @@ export async function finalApply(ctx: Context): Promise<number> {
   const json: FinalApplyOk = {
     round: round.n,
     opBefore,
+    rebased,
     opAfter,
     commits: final.groups.map((g, i) => {
       const c = byChange.get(tops[i]!)!;
@@ -403,6 +456,7 @@ export async function finalApply(ctx: Context): Promise<number> {
   const top = json.commits.at(-1)!;
   ctx.print(json, [
     `Applied final round ${round.n}: ${round.changes.length} changes → ${json.commits.length} commits`,
+    ...(rebased ? ["  (rebased after the approval: same code, and the checks pass on it)"] : []),
     ...json.commits.map(
       (c) =>
         `  ${short(c.changeId)} ${short(c.commitId)}  ${c.subject}` +
@@ -413,4 +467,9 @@ export async function finalApply(ctx: Context): Promise<number> {
     `Next: push the stack${top.bookmarks[0] ? ` (e.g. \`jj git push -b ${top.bookmarks[0]}\`)` : ""} and open a PR with that body.`,
   ]);
   return 0;
+}
+
+/** Whether a stack's commits were rewritten since a round (e.g. rebased), code aside. */
+function rewritten(snap: Snapshot, round: Round): boolean {
+  return stackCommits(snap) !== stackCommits(round);
 }

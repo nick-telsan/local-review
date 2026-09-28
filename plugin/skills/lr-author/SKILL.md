@@ -126,7 +126,7 @@ body.
 3. **Draft the PR body** with `lr final pr-body -F -`: what the PR does and why, how it was tested,
    and anything reviewers should know. Follow the PR template if there is one.
 4. **Open the final round** with `lr review create --final`. It freezes the grouping, the messages,
-   and the PR body for review. It refuses if the stack changed since the approval, a draft is
+   and the PR body for review. It refuses if the code changed since the approval, a draft is
    missing, or a thread is still open.
 5. **If changes are requested,** `lr handoff` shows threads on the messages and the PR body. Redraft
    (`lr final message` / `lr final pr-body`), reply to each thread, and run
@@ -139,3 +139,15 @@ body.
 Only the developer decides how a phase is split: `lr final cut <change>` starts a new final commit at
 that change. Don't edit the drafts after the final round is approved. lr refuses to apply drafts
 that differ from what was approved.
+
+## Rebasing
+
+Rebase only when the developer asks, or when the stack needs something that landed on its base. Use
+`lr rebase`. It rebases the whole stack onto the feature's base, bookmarks and working copy included,
+and prints the command to undo it. `lr rebase --onto <revset>` moves the stack to a new base, for
+example onto trunk once the feature it was stacked on has landed.
+
+- If it reports conflicts, resolve each one in the change where it appears (`jj edit <change>`).
+- A clean rebase keeps an approval, because each change's code is the same. lr reruns the checks
+  before finalizing. Resolving a conflict changes the code, so it needs a code round
+  (`lr review create`).

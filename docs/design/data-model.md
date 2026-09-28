@@ -155,11 +155,10 @@ interface Round {
   base: { commitId: string };
   changes: ChangeSnapshot[]; // ordered base → tip, linear stack only (v1)
   // closed = reviewed, then replaced by the next round; superseded = replaced before anyone
-  // reviewed it (or by a rebase mid-review)
+  // reviewed it
   status: "open" | "closed" | "superseded";
   verdict: "changes_requested" | "approved" | null; // set by a human's review
   final: FinalSnapshot | null; // final rounds only
-  rebases: string[]; // RebaseEvent ids since the previous round
   createdBy: Actor;
   createdAt: string;
 }
@@ -181,38 +180,40 @@ A change's phase is the first phase bookmark at or after it in stack order.
 
 ### Rebase
 
-Change ids survive a rebase, so anchors and phase membership are unaffected. What breaks is
-anything keyed on commit ids or tree diffs:
+Change ids survive a rebase, so anchors, phase membership, and squash groups are unaffected. What
+changes is every commit id, and with them the trees:
 
-- **"What changed since last round."** A tree diff of the old and new commit includes everything
-  that landed on trunk in between. The review view uses `jj interdiff` instead, which rebases the
-  old commit onto the new parent before diffing, so only the change's own patch edits show up.
-  (Verified on jj 0.45: after a rebase onto a trunk commit that touched the same file, `jj diff`
-  shows the trunk line and `jj interdiff` is empty.)
-- **Checks.** Every check run is stale, because every commit id changed.
+- **"What changed since last round."** A tree diff of a change's old and new commit includes
+  everything that landed on the base in between. `jj interdiff` rebases the old commit onto the new
+  parent before comparing, so only edits to the change's own patch show up. (Verified on jj 0.45:
+  after a rebase onto a trunk commit that touched the same file, `jj diff` shows the trunk line and
+  `jj interdiff` is empty.)
+- **Checks.** A check run is keyed on the commit id, so none carries over.
 - **Conflicts.** A rebase can leave changes conflicted, and those have to be resolved before the
   next round.
 
-`lr rebase [--onto <revset>]` handles this explicitly. It runs `jj rebase` for the stack (or adopts
-a rebase that already happened, if the base moved), records a `RebaseEvent`, marks checks stale,
-re-anchors threads, and reports any conflicted changes. If a round is open, it marks that round
-`superseded` and opens round N+1: draft reviews move to the new round, and a submit against the
-superseded round is rejected with a pointer to the new one. `lr review create` also detects a moved
-base that `lr rebase` didn't record, and handles it the same way (with a warning).
+lr keeps no rebase state of its own, so a plain `jj rebase` works as well as `lr rebase`:
 
-```ts
-interface RebaseEvent {
-  id: string;
-  fromBase: string; // commit ids
-  toBase: string;
-  onto: string; // revset as given
-  jjOpBefore: string; // undo point
-  jjOpAfter: string;
-  conflicted: string[]; // change ids left conflicted
-  by: Actor;
-  at: string;
-}
-```
+- **Rounds are snapshots.** A round keeps the commits it was taken from, and those stay readable
+  after a rebase hides them. An open round stays open, and reviews of it still count. The next
+  `lr review create` picks up the rebased stack like any other edit: it reruns the checks and
+  re-anchors threads, mapping lines through the base's changes.
+- **An approval survives a clean rebase.** Finalizing needs the code a human approved, which is
+  judged change by change (`codeChanges`). The change ids and phases must be the same, and in
+  order. Each change must be unconflicted, with the same message and no file in
+  `jj interdiff --name-only`. A conflict always counts as a change, even though interdiff can't see
+  one: a change that conflicts the same way on both sides comes out empty. If the commits were
+  rewritten but the code is the same, `lr review create --final` and `lr final apply` rerun the
+  checks on the new commits first, and refuse if any fail. Resolving a conflict changes the code,
+  so it goes back through a code round.
+
+`lr rebase [--onto <revset>]` is the convenient way to do it. It resolves the target to one commit,
+which has to be outside the stack, and runs `jj rebase --source <first change> --onto <commit>`.
+Bookmarks and the working copy come along. Then it reports the conflicted changes, the undo point,
+and what to do next for the feature's status. `--onto` also makes the revset the feature's base from
+then on, e.g. to move a stacked feature onto trunk once the feature below it lands. Rebasing is
+never automatic. The author does it when the developer asks, or when the stack needs something that
+landed on the base.
 
 ### Checks
 
@@ -497,24 +498,24 @@ interface FinalSnapshot {
 ```
 
 It's refused unless:
-- the stack's commits are exactly the approved round's;
+- the stack has the code the human approved (a clean rebase is fine; see Rebase);
 - every group has a message and there's a PR body;
 - no thread is `open` or `proposed`.
 
-It reuses the approved round's checks. Reviewers comment on the messages and the PR body with
+It reuses the approved round's checks, or reruns them if the stack was rebased. Reviewers comment on the messages and the PR body with
 `final` and `pr_body` locations (see Review submissions). Code comments still work. Anything that
 needs a code change goes back through a code round (`lr review create`). Threads on messages and the
 PR body stay put during code rounds, and get re-anchored at the next final round.
 
 **What's applied is what a human approved.** A human can't approve a final round if the drafts have
 changed since it opened. `lr final apply` refuses if they've changed since the approval, if a thread
-is open, or if the stack changed.
+is open, or if the code changed. After a clean rebase, it reruns the checks first.
 
 **`lr final apply`:**
 1. Records the jj operation as the undo point.
 2. Squashes each group into its last change with its message. The last change keeps its change id
    and the phase's bookmark.
-3. Checks that the new top of the stack has exactly the approved tree.
+3. Checks that the new top of the stack has exactly the tree of the old top.
 4. On any failure, it runs `jj op restore` back to the undo point and reports the error. On success,
    it records the apply (`final_applies`) and marks the feature `done`.
 
@@ -631,7 +632,7 @@ These are the only write paths into the model, so it's worth listing them now:
 | `lr final cut <change> [--remove]`                                       | developer      | split a phase into more than one final commit                                 |
 | `lr final apply`                                                         | anyone         | squash the stack as approved                                                  |
 | `lr status [--json]`                                                     | anyone         | feature state + what's expected next                                          |
-| `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack (or adopt one already done); see Rebase                      |
+| `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack onto its base (`--onto`: a new base); see Rebase             |
 | `lr hook session-start\|pre-tool-use\|stop`                              | Claude Code    | hook handlers; see Claude Code integration                                    |
 | `lr feature clean <slug> [--purge]`                                      | developer      | clean up a done/abandoned feature (see below)                                 |
 | `lr repo relink <path>`                                                  | developer      | repair the repo key after the repo moves                                      |
@@ -664,8 +665,12 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
 
 - **jj only.** Colocated git repos should work, but only through jj.
 - **Bookmarks after `final apply`:** kept. `lr feature clean` removes them later.
-- **Rebases:** handled explicitly by `lr rebase`. Anchors survive because they're keyed on change
-  ids; the review view uses interdiffs.
+- **Rebases leave no trace in lr's state.** `lr rebase` is a convenience over `jj rebase`, and lr
+  treats both the same way. There's no rebase record: the undo point is in jj's operation log. A
+  rebase doesn't supersede an open round, since the round's snapshot is still what its reviewers
+  are reading.
+- **An approval covers each change's own diff, not its commit id,** so a clean rebase keeps it. The
+  checks run again on the rebased commits before anything is finalized.
 - **Repo moves:** `lr repo relink`.
 - **Notes during implementation:** re-anchored at every `lr review create`.
 - **Final rounds, not a separate artifact:** the final review is a round of kind `final`, so reviews,

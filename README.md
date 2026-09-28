@@ -43,6 +43,7 @@ lr reply 12 --addressed "Added NOT NULL in kxqp"         # author
 lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads
 lr status
+lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 
 # once you've approved with nothing open:
 lr final show                      # final commits: one per phase (lr final cut <change> splits one)
@@ -115,6 +116,10 @@ timeout = "10m"       # default 10m
 
 Checks run in a separate jj workspace, so your working copy is never touched. A passing result
 is reused as long as the commit and the command haven't changed.
+
+Rebasing (with `lr rebase` or plain `jj rebase`) doesn't disturb a review. An approval survives a
+clean rebase, because lr compares each change's own diff (`jj interdiff`), not commit ids. The checks
+run again on the rebased commits before anything is finalized.
 
 For drafting final commit messages and the PR body, point lr at your guidelines. The PR template
 defaults to `.github/pull_request_template.md`:

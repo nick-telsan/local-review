@@ -148,3 +148,49 @@ export async function takeSnapshot(
     warnings,
   };
 }
+
+/**
+ * How stack `now` differs from stack `then` as code to review, e.g. `kxqpmnop's diff changed`.
+ * What a clean rebase changes (commit ids, the base) doesn't count, so an empty result means a
+ * review of `then` still holds for `now`.
+ */
+export async function codeChanges(
+  jj: Jj,
+  then: ChangeSnapshot[],
+  now: ChangeSnapshot[],
+): Promise<string[]> {
+  const short = (id: string) => id.slice(0, 8);
+  const thenIds = then.map((c) => c.changeId);
+  const nowIds = now.map((c) => c.changeId);
+  if (thenIds.join() !== nowIds.join()) {
+    const parts = [
+      ...nowIds.filter((id) => !thenIds.includes(id)).map((id) => `${short(id)} added`),
+      ...thenIds.filter((id) => !nowIds.includes(id)).map((id) => `${short(id)} removed`),
+    ];
+    return [parts.length ? parts.join(", ") : "the changes were reordered"];
+  }
+
+  const found = await Promise.all(
+    then.map(async (before, i) => {
+      const after = now[i]!;
+      const c = short(after.changeId);
+      const diffs: string[] = [];
+      if (after.commitId !== before.commitId) {
+        // interdiff can't tell a conflict from its resolution, so a conflict always counts.
+        if (after.conflicted) diffs.push(`${c} is conflicted`);
+        else {
+          const files = await jj.interdiffFiles(before.commitId, after.commitId);
+          if (files.length) diffs.push(`${c}'s diff changed in ${files.join(", ")}`);
+        }
+        if (after.description !== before.description) diffs.push(`${c}'s message changed`);
+      }
+      if (after.phaseId !== before.phaseId) {
+        diffs.push(
+          `${c} moved from phase ${before.phaseId ?? "none"} to ${after.phaseId ?? "none"}`,
+        );
+      }
+      return diffs;
+    }),
+  );
+  return found.flat();
+}

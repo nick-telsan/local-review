@@ -265,6 +265,10 @@ export class Store {
     this.db.query("UPDATE features SET status = ? WHERE slug = ?").run(status, slug);
   }
 
+  setBaseRevset(slug: string, baseRevset: string): void {
+    this.db.query("UPDATE features SET base_revset = ? WHERE slug = ?").run(baseRevset, slug);
+  }
+
   // ── plans ─────────────────────────────────────────────────────────────────
 
   addPlanVersion(
