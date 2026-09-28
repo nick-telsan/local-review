@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type CheckSettings, checkTargets, runChecks } from "../src/checks.ts";
+import { type CheckSettings, checkTargets, runChecks, STOP } from "../src/checks.ts";
 import type { CheckConfig } from "../src/config.ts";
+import { LrError } from "../src/errors.ts";
 import { Jj } from "../src/jj.ts";
 import type { ChangeSnapshot } from "../src/model.ts";
 import { parsePlan } from "../src/plan.ts";
@@ -148,5 +149,90 @@ describe("runChecks", () => {
     await Bun.$`rm -rf ${join(featureDir, "workspaces")}`;
     const again = await run(config);
     expect(again.results.map((r) => r.run.status)).toEqual(["fail"]);
+  });
+
+  describe("stopping checks", () => {
+    // Each command records its process group (its shell's pid), to check nothing outlives it.
+    const pgidFile = () => join(repo.tmp, "pgid");
+    const one = (run: string, timeoutMs = 5000): CheckSettings => ({
+      setup: null,
+      checks: [{ name: "c", run: `echo $$ > ${pgidFile()}; ${run}`, at: "tip", timeoutMs }],
+    });
+    const groupGone = async () => {
+      const pgid = Number(await Bun.file(pgidFile()).text());
+      expect(() => process.kill(-pgid, 0)).toThrow();
+    };
+    const log = (r: { results: { run: { logPath: string } }[] }) =>
+      Bun.file(r.results[0]!.run.logPath).text();
+
+    afterEach(() => {
+      STOP.graceMs = 5000;
+    });
+
+    test("a timeout stops everything the check started", async () => {
+      const started = Date.now();
+      const r = await run(one("sleep 30 & sleep 30", 300));
+      expect(r.results.map((x) => x.run.status)).toEqual(["error"]);
+      expect(await log(r)).toContain("[lr] timed out after 300ms; stopped with SIGTERM");
+      expect(Date.now() - started).toBeLessThan(5000);
+      await groupGone();
+    });
+
+    test("SIGKILL when the check ignores SIGTERM", async () => {
+      STOP.graceMs = 200;
+      const r = await run(one("trap '' TERM; sleep 30", 200));
+      expect(await log(r)).toContain("stopped with SIGKILL");
+      await groupGone();
+    });
+
+    test("processes a passing check leaves behind are stopped", async () => {
+      const r = await run(one("sleep 30 & true"));
+      expect(r.results.map((x) => x.run.status)).toEqual(["pass"]);
+      expect(await log(r)).toContain("[lr] stopped processes it left running (SIGTERM)");
+      await groupGone();
+    });
+
+    /** Run checks, and send lr `signals` once the check has started. */
+    async function interrupt(settings: CheckSettings, signals: NodeJS.Signals[]) {
+      const running = run(settings).catch((e: unknown) => e);
+      while (!existsSync(pgidFile())) await Bun.sleep(20);
+      for (const signal of signals) {
+        process.emit(signal, signal);
+        await Bun.sleep(100);
+      }
+      return (await running) as LrError;
+    }
+
+    test("Ctrl-C stops the check and the round", async () => {
+      const listeners = process.listenerCount("SIGINT");
+      const e = await interrupt(one("sleep 30"), ["SIGINT"]);
+      expect(e).toBeInstanceOf(LrError);
+      expect(e.message).toBe("checks interrupted by SIGINT");
+      expect(e.exitCode).toBe(130);
+      await groupGone();
+      const row = store.db.query("SELECT status, log_path FROM check_runs").get() as {
+        status: string;
+        log_path: string;
+      };
+      expect(row.status).toBe("error");
+      expect(await Bun.file(row.log_path).text()).toContain("[lr] interrupted by SIGINT");
+      // lr stops listening once the check is over.
+      expect(process.listenerCount("SIGINT")).toBe(listeners);
+    });
+
+    test("a second Ctrl-C kills a check that ignores the first", async () => {
+      const e = await interrupt(one("trap '' INT; sleep 30"), ["SIGINT", "SIGINT"]);
+      expect(e.exitCode).toBe(130);
+      await groupGone();
+    });
+
+    test("an interrupted setup stops the round", async () => {
+      const e = await interrupt(
+        { setup: `echo $$ > ${pgidFile()}; sleep 30`, checks: [check("c", "tip")] },
+        ["SIGTERM"],
+      );
+      expect(e.exitCode).toBe(143);
+      expect(store.db.query("SELECT * FROM check_runs").all()).toEqual([]);
+    });
   });
 });

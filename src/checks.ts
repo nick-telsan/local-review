@@ -86,6 +86,7 @@ export async function runChecks(opts: {
       if (opts.config.setup) {
         const setupLog = join(logDir, `setup-${commitId.slice(0, 12)}-${Bun.randomUUIDv7()}.log`);
         const res = await execLogged(opts.config.setup, ws.dir, setupLog, 10 * 60_000, {});
+        if (res.interrupted) throw interruptedError(res.interrupted);
         if (res.status !== "pass") {
           log(`  setup failed: ${setupLog}`);
           setupFailed = { logPath: setupLog };
@@ -109,6 +110,7 @@ export async function runChecks(opts: {
           finishedAt: null,
         };
         store.insertCheckRun(slug, run);
+        let interrupted: Forwarded | null = null;
 
         if (setupFailed) {
           run.status = "error";
@@ -121,6 +123,7 @@ export async function runChecks(opts: {
           });
           run.status = res.status;
           run.exitCode = res.exitCode;
+          interrupted = res.interrupted;
         }
         run.finishedAt = new Date().toISOString();
         store.updateCheckRun(id, {
@@ -128,6 +131,7 @@ export async function runChecks(opts: {
           exitCode: run.exitCode,
           finishedAt: run.finishedAt,
         });
+        if (interrupted) throw interruptedError(interrupted);
         log(`  ${check.name}: ${run.status}`);
         results.push({ run, cached: false });
       }
@@ -138,36 +142,131 @@ export async function runChecks(opts: {
   return results;
 }
 
+/** Stop the round: the developer asked lr to stop, so it exits the way an interrupted shell does. */
+function interruptedError(signal: Forwarded): LrError {
+  return new LrError(`checks interrupted by ${signal}`, 128 + SIGNAL_NUMBER[signal]);
+}
+
+/** How long a stopped check gets to exit after SIGTERM before lr sends SIGKILL. */
+export const STOP = { graceMs: 5000 };
+
+/** Signals lr passes on to a running check, since the check runs in its own process group. */
+const FORWARDED = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+type Forwarded = (typeof FORWARDED)[number];
+const SIGNAL_NUMBER: Record<Forwarded, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
+
+interface ExecResult {
+  status: "pass" | "fail" | "error";
+  exitCode: number | null;
+  /** lr received this signal while the command ran. */
+  interrupted: Forwarded | null;
+}
+
+/**
+ * Run `command` in its own process group, so a timeout stops everything it started, not just the
+ * shell. Whatever it leaves running is stopped too, before lr touches the workspace again.
+ */
 async function execLogged(
   command: string,
   cwd: string,
   logPath: string,
   timeoutMs: number,
   env: Record<string, string>,
-): Promise<{ status: "pass" | "fail" | "error"; exitCode: number | null }> {
+): Promise<ExecResult> {
   const fd = openSync(logPath, "w");
   try {
     writeSync(fd, `$ ${command}\n`);
-    const proc = Bun.spawn(["sh", "-c", command], {
-      cwd,
-      stdin: "ignore",
-      stdout: fd,
-      stderr: fd,
-      env: { ...process.env, ...env },
-      timeout: timeoutMs,
-      killSignal: "SIGKILL",
-    });
-    const exitCode = await proc.exited;
-    if (proc.signalCode) {
-      writeSync(fd, `\n[lr] killed by ${proc.signalCode} (timeout ${timeoutMs}ms)\n`);
-      return { status: "error", exitCode: null };
+    let proc: Bun.Subprocess;
+    try {
+      proc = Bun.spawn(["sh", "-c", command], {
+        cwd,
+        stdin: "ignore",
+        stdout: fd,
+        stderr: fd,
+        env: { ...process.env, ...env },
+        detached: true,
+      });
+    } catch (e) {
+      writeSync(fd, `\n[lr] failed to start: ${(e as Error).message}\n`);
+      return { status: "error", exitCode: null, interrupted: null };
     }
-    return { status: exitCode === 0 ? "pass" : "fail", exitCode };
-  } catch (e) {
-    writeSync(fd, `\n[lr] failed to start: ${(e as Error).message}\n`);
-    return { status: "error", exitCode: null };
+    const group = new ProcessGroup(proc.pid);
+
+    let timedOut: Promise<StopSignal | null> | null = null;
+    const timer = setTimeout(() => {
+      timedOut = group.stop();
+    }, timeoutMs);
+    // The check isn't in the terminal's process group, so Ctrl-C reaches lr alone: pass it on,
+    // and a second one kills.
+    let interrupted: Forwarded | null = null;
+    const onSignal = (signal: Forwarded) => {
+      group.kill(interrupted ? "SIGKILL" : signal);
+      interrupted ??= signal;
+    };
+    for (const signal of FORWARDED) process.on(signal, onSignal);
+
+    try {
+      const exitCode = await proc.exited;
+      clearTimeout(timer);
+      const stoppedBy = await (timedOut ?? group.stop());
+      if (interrupted) {
+        writeSync(fd, `\n[lr] interrupted by ${interrupted}\n`);
+        return { status: "error", exitCode: null, interrupted };
+      }
+      if (timedOut) {
+        writeSync(fd, `\n[lr] timed out after ${timeoutMs}ms; stopped with ${stoppedBy}\n`);
+        return { status: "error", exitCode: null, interrupted: null };
+      }
+      if (stoppedBy) writeSync(fd, `\n[lr] stopped processes it left running (${stoppedBy})\n`);
+      return { status: exitCode === 0 ? "pass" : "fail", exitCode, interrupted: null };
+    } finally {
+      clearTimeout(timer);
+      for (const signal of FORWARDED) process.off(signal, onSignal);
+    }
   } finally {
     closeSync(fd);
+  }
+}
+
+type StopSignal = "SIGTERM" | "SIGKILL";
+
+/** A process group led by a check's shell: the check and everything it started. */
+class ProcessGroup {
+  constructor(private readonly pgid: number) {}
+
+  /** False once there's nothing left to signal. */
+  kill(signal: NodeJS.Signals | 0): boolean {
+    try {
+      process.kill(-this.pgid, signal);
+      return true;
+    } catch (e) {
+      // ESRCH: the group is empty. EPERM: macOS, when only zombies are left.
+      if (["ESRCH", "EPERM"].includes((e as NodeJS.ErrnoException).code!)) return false;
+      throw e;
+    }
+  }
+
+  alive(): boolean {
+    return this.kill(0);
+  }
+
+  /** SIGTERM, then SIGKILL if it outlasts the grace period. Null if nothing was running. */
+  async stop(): Promise<StopSignal | null> {
+    if (!this.alive()) return null;
+    this.kill("SIGTERM");
+    if (await this.gone(STOP.graceMs)) return "SIGTERM";
+    this.kill("SIGKILL");
+    await this.gone(STOP.graceMs);
+    return "SIGKILL";
+  }
+
+  private async gone(ms: number): Promise<boolean> {
+    const until = Date.now() + ms;
+    while (this.alive()) {
+      if (Date.now() >= until) return false;
+      await Bun.sleep(20);
+    }
+    return true;
   }
 }
 

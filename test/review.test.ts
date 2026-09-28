@@ -134,7 +134,9 @@ describe("lr review create", () => {
     const r = await lrJson<ReviewCreateBlocked>(repo, "review", "create");
     expect(r.code).toBe(1);
     expect(r.data.checks.map((c) => c.status)).toEqual(["error", "error"]);
-    expect(await Bun.file(r.data.checks[0]!.logPath).text()).toContain("killed by SIGKILL");
+    expect(await Bun.file(r.data.checks[0]!.logPath).text()).toContain(
+      "[lr] timed out after 300ms; stopped with SIGTERM",
+    );
   });
 
   test("a failing setup marks that commit's checks as errors", async () => {

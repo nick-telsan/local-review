@@ -259,6 +259,14 @@ in their environment.
 If a check fails, or a change is conflicted (conflicts propagate to descendants), no round is
 opened. The runs are still recorded, so their logs are available for the fix.
 
+Each check (and setup) runs in its own process group, so stopping it stops everything it started,
+not just the shell. A check past its timeout gets SIGTERM, then SIGKILL 5 seconds later; the run is
+an `error`. Anything a check leaves running after it exits (a background server, say) is stopped
+the same way, without changing its result, so nothing touches the workspace after lr moves on. The
+group isn't in the terminal's foreground group, so lr passes SIGINT, SIGTERM and SIGHUP on to the
+running check; a second one kills it. The run is recorded as an `error`, no round is opened, and lr
+exits as an interrupted shell would (130 for Ctrl-C).
+
 ### Review
 
 ```ts
@@ -722,6 +730,8 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
   are reading.
 - **An approval covers each change's own diff, not its commit id,** so a clean rebase keeps it. The
   checks run again on the rebased commits before anything is finalized.
+- **Checks run in their own process group**, so a timeout can stop what a check started, not only
+  its shell. The cost is that lr has to pass Ctrl-C on itself.
 - **Repo moves:** `lr repo relink`, rather than a repo id stored in the repo. lr keeps nothing in
   the working copy, and matching on recorded commits finds the history without one.
 - **Notes are anchored to the live stack,** because they're written mid-phase, before any round.
