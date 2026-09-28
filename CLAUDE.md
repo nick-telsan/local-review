@@ -48,11 +48,11 @@ bundled into the page.
 
 ## Web UI
 
-`web/` is the React app `lr ui` serves; `src/ui/` is its server and API. The API's types live in
-`src/ui/api.ts` and `web/` imports them (type-only, plus `src/patch.ts`, which is shared and must
-stay free of Bun APIs). `web/` has its own `tsconfig.json` (DOM, JSX), and `bun run typecheck`
-checks both. Tests cover the server and API against real repos; the React code has no tests yet, so
-check UI changes in a browser. With `LR_UI_DEV=1`, `lr ui` serves the page with hot reloading.
+`src/web/` is the React app `lr ui` serves; `src/ui/` is its server and API. The API's types live
+in `src/ui/api.ts`, and `src/web/` imports them type-only. The only runtime code it shares is
+`src/patch.ts`, which must stay free of Bun APIs, since it runs in the browser too. Tests cover the
+server and API against real repos; the React code has no tests yet, so check UI changes in a
+browser. With `LR_UI_DEV=1`, `lr ui` serves the page with hot reloading.
 
 ## Claude Code plugin
 

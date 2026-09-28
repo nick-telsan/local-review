@@ -11,7 +11,7 @@
   "scripts": {
     "lr": "bun src/bin.ts",
     "test": "bun test --coverage",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
+    "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "fix": "biome check --write .",
     "check": "bun run lint && bun run typecheck && bun run test",

@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Server } from "bun";
-import page from "../../web/index.html";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
+import page from "../web/index.html";
 import { changeView, features, roundView } from "./api.ts";
 
 /** How often the server checks whether another process (the CLI, an agent) changed lr's state. */

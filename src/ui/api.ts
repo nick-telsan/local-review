@@ -1,4 +1,4 @@
-// What the web UI reads. Types here are the UI's API; web/ imports them.
+// What the web UI reads. Types here are the UI's API; src/web/ imports them.
 import { join } from "node:path";
 import { refAt } from "../anchors.ts";
 import { nextStep } from "../commands/status.ts";

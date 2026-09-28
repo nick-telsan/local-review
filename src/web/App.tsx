@@ -1,4 +1,4 @@
-import type { FeaturesOk } from "../src/ui/api.ts";
+import type { FeaturesOk } from "../ui/api.ts";
 import { useApi } from "./api.ts";
 import { RoundPage } from "./RoundPage.tsx";
 import { Link, match, usePath } from "./router.tsx";

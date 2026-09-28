@@ -1,6 +1,6 @@
-import type { ChangeSnapshot } from "../src/model.ts";
-import { filePath } from "../src/patch.ts";
-import type { ChangeView, RoundView, ThreadView } from "../src/ui/api.ts";
+import type { ChangeSnapshot } from "../model.ts";
+import { filePath } from "../patch.ts";
+import type { ChangeView, RoundView, ThreadView } from "../ui/api.ts";
 import { useApi } from "./api.ts";
 import { FileDiffView } from "./Diff.tsx";
 import { threadChange } from "./RoundPage.tsx";

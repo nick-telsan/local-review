@@ -1,6 +1,6 @@
 // Small shared pieces: pills, badges, times, errors.
 import type { ReactNode } from "react";
-import type { Actor, CheckRun } from "../src/model.ts";
+import type { Actor, CheckRun } from "../model.ts";
 import type { ApiError } from "./api.ts";
 
 export function formatActor(a: Actor): string {

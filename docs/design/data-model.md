@@ -762,7 +762,7 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
 `lr ui` serves a React app and a JSON API on 127.0.0.1 and opens the browser (`$BROWSER`, else the
 platform's opener) at the current feature's latest round. It runs until Ctrl-C. One per repo: it records its pid, port, and token in
 `<repo-key>/ui.json` (mode 0600), and a second `lr ui` opens that one instead of starting another.
-The standalone binary embeds the page; from source, Bun bundles `web/index.html` at startup.
+The standalone binary embeds the page; from source, Bun bundles `src/web/index.html` at startup.
 
 It acts as a person: `--as` or `$LR_ACTOR` if either names a human, else the OS user, never the
 coding agent whose shell started it. For now it only reads.
@@ -827,9 +827,10 @@ the stack is listed on the round's overview.
   than the OS user. Your own `!` commands inside Claude Code therefore need `--as <you>`.
 - **The Stop reminder only fires for changes made in the session:** a session that didn't touch the
   stack isn't asked about it.
-- **The UI is a local web app, not a desktop app (yet).** All of lr is TypeScript on Bun, so a desktop
-  shell would still run lr as a sidecar, and add signing, packaging, and updates. The browser gives
-  deep links and tabs for free. A desktop wrapper can come later around the same server.
+- **The UI is a local web app, served by lr, not a desktop app.** All of lr is TypeScript on Bun, so a
+  desktop shell (Electron, Tauri) would still run lr as a sidecar, and add signing, packaging, and
+  updates. The browser gives deep links and tabs for free. The page is part of lr's source
+  (`src/web/`), built into the same binary.
 - **The UI's diff view is our own,** not a library's: lr's model (a stack of changes, threads that
   move between rounds, comments on messages) doesn't fit general-purpose diff components.
 - **Re-anchoring state is relative to where the comment was made,** not the previous round, so

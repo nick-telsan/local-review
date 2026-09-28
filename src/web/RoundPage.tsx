@@ -1,5 +1,5 @@
-import type { ChangeSnapshot, Phase, ThreadStatus } from "../src/model.ts";
-import type { RoundView, ThreadView } from "../src/ui/api.ts";
+import type { ChangeSnapshot, Phase, ThreadStatus } from "../model.ts";
+import type { RoundView, ThreadView } from "../ui/api.ts";
 import { useApi } from "./api.ts";
 import { ChangePane } from "./ChangePane.tsx";
 import { Link } from "./router.tsx";

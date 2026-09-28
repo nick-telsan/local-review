@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
-import { type DiffLine, type FileDiff, filePath } from "../src/patch.ts";
-import type { ThreadView } from "../src/ui/api.ts";
+import { type DiffLine, type FileDiff, filePath } from "../patch.ts";
+import type { ThreadView } from "../ui/api.ts";
 import { ThreadCard } from "./Thread.tsx";
 
 /** Diffs longer than this start collapsed. */

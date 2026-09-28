@@ -1,5 +1,5 @@
-import type { Anchor, Entry } from "../src/model.ts";
-import type { ThreadView } from "../src/ui/api.ts";
+import type { Anchor, Entry } from "../model.ts";
+import type { ThreadView } from "../ui/api.ts";
 import { ActorName, Pill, short, Time } from "./ui.tsx";
 
 export function ThreadList({ threads }: { threads: ThreadView[] }) {
