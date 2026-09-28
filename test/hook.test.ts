@@ -109,6 +109,10 @@ describe("lr hook pre-tool-use", () => {
     expect(humanClaim("cd x && lr status --as agent:a")).toBeNull();
     // --as only matters on an lr command.
     expect(humanClaim("other --as nick")).toBeNull();
+    // The UI acts as the OS user.
+    expect(humanClaim("lr ui --no-open")).toBe(`human:${process.env.USER}`);
+    expect(humanClaim("lr ui --as sam")).toBe("human:sam");
+    expect(humanClaim("lr uiux")).toBeNull();
   });
 });
 

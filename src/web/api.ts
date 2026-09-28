@@ -47,6 +47,22 @@ export async function get<T>(path: string): Promise<T> {
   return body as T;
 }
 
+/** A write. Everything shown refetches afterwards (other pages hear via the event stream). */
+export async function send<T>(method: string, path: string, data?: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${getToken() ?? ""}`,
+      "content-type": "application/json",
+    },
+    body: data === undefined ? undefined : JSON.stringify(data),
+  });
+  const body = (await res.json()) as T | { error: string };
+  if (!res.ok) throw new ApiError((body as { error: string }).error, res.status);
+  for (const l of listeners) l();
+  return body as T;
+}
+
 // One event stream per page; each `useApi` refetches when lr's state changes.
 const listeners = new Set<() => void>();
 let source: EventSource | null = null;

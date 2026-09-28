@@ -17,6 +17,9 @@
   --warn-soft: #fdf3dd;
   --hunk-bg: #f0f3fa;
   --commented: #fff6d6;
+  --picked: #e3eafe;
+  --draft: #8a5cf6;
+  --draft-soft: #f1ebfe;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -43,6 +46,9 @@
     --warn-soft: #33290f;
     --hunk-bg: #1d2233;
     --commented: #35300f;
+    --picked: #243058;
+    --draft: #b69cff;
+    --draft-soft: #2a2242;
     --shadow: none;
     color-scheme: dark;
   }
@@ -689,6 +695,235 @@ tr.inline-threads .thread-list {
 }
 .error-box p {
   margin: 4px 0 0;
+}
+
+/* Buttons and forms */
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--sunken);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--panel);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+button.danger {
+  border-color: var(--del-text);
+  color: var(--del-text);
+}
+button.link-button {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  color: var(--accent);
+}
+button.link-button:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+button.link-button.danger {
+  color: var(--del-text);
+}
+.count.on-primary {
+  margin-left: 8px;
+  background: var(--panel);
+  color: var(--accent);
+}
+.add-comment {
+  display: block;
+  margin: 8px 0;
+  border-style: dashed;
+  color: var(--muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.comment-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.suggestion-edit {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.suggestion-edit textarea {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--add-bg);
+}
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.form-error {
+  margin: 0;
+  color: var(--del-text);
+  white-space: pre-wrap;
+}
+.severity-picker,
+.verdicts {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.severity-picker label {
+  padding: 1px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.severity-picker label.chosen {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.severity-picker input,
+.verdicts input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.severity-picker label:has(input:focus-visible),
+.verdicts label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+}
+
+/* Drafts and replies */
+
+.thread.draft {
+  border-color: var(--draft);
+  border-style: dashed;
+}
+.thread.draft .thread-head {
+  background: var(--draft-soft);
+}
+.pill-draft {
+  background: var(--draft-soft);
+  color: var(--draft);
+  border-color: transparent;
+}
+.thread-reply {
+  display: grid;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border);
+}
+.thread-reply button {
+  font-size: 12px;
+  padding: 2px 10px;
+}
+
+/* Picking lines to comment on */
+
+.num-button {
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+.num-button:hover:not(:disabled) {
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+tr.picked td.num,
+tr.picked td.code {
+  background: var(--picked);
+}
+
+/* The review panel */
+
+.review-panel-anchor {
+  position: relative;
+}
+.review-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(480px, calc(100vw - 32px));
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.18);
+}
+.review-panel h3 {
+  font-size: 15px;
+}
+.review-panel p {
+  margin: 0;
+}
+.verdicts {
+  flex-direction: column;
+}
+.verdicts label {
+  display: block;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.verdicts label.chosen {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 @media (max-width: 800px) {

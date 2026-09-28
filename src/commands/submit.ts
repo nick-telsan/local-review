@@ -32,9 +32,34 @@ export async function reviewSubmit(
   const data: Record<string, unknown> = opts.file ? await readJson(ctx, opts.file) : {};
   if (opts.verdict) data.verdict = opts.verdict;
   if (opts.body) data.body = opts.body;
-  const submission = parseSubmission(data);
-
   const round = pickRound(ctx, feature, opts.round);
+  const json = await recordReview(ctx, feature, round, data);
+
+  const { review, threads } = json;
+  const who = `${review.reviewer.kind}:${review.reviewer.name}`;
+  ctx.print(json, [
+    `Review recorded on round ${round.n} by ${who}: ${review.verdict?.replace("_", " ") ?? "comments only"}`,
+    ...threads.map(
+      (t) => `  #${t.id} ${(t.severity ?? "").padEnd(10)} ${describeAnchor(t.anchor)}`,
+    ),
+    ...(threads.some((t) => t.status === "proposed")
+      ? [`${threads.length} comment(s) await triage by a human (review.triage_agent_comments)`]
+      : []),
+  ]);
+  return 0;
+}
+
+/**
+ * Record a review (in review-file form) by `ctx.actor` on an open round. Every comment location is
+ * validated against the round's snapshot, and nothing is recorded unless all of them resolve.
+ */
+export async function recordReview(
+  ctx: Context,
+  feature: Feature,
+  round: Round,
+  data: unknown,
+): Promise<ReviewSubmitOk> {
+  const submission = parseSubmission(data);
   // A human approves exactly what the final round froze; later edits need a new final round.
   if (round.final && submission.verdict === "approved" && ctx.actor.kind === "human") {
     const changed = new Drafts(join(ctx.featureDir(feature.slug), "final")).changedSince(
@@ -47,8 +72,7 @@ export async function reviewSubmit(
       );
     }
   }
-  const plan = ctx.store.getPlanVersion(feature.slug, round.planVersion)!;
-  const resolver = new AnchorResolver(ctx.jj, round, plan.phases);
+  const resolver = resolverFor(ctx, feature, round);
 
   const anchors: Anchor[] = [];
   const problems: string[] = [];
@@ -66,7 +90,7 @@ export async function reviewSubmit(
 
   const { review: config } = await loadRepoConfig(ctx.jj.root);
   const status = ctx.actor.kind === "agent" && config.triageAgentComments ? "proposed" : "open";
-  const { review, threads } = ctx.store.submitReview(feature.slug, {
+  return ctx.store.submitReview(feature.slug, {
     round: round.n,
     reviewer: ctx.actor,
     verdict: submission.verdict,
@@ -79,23 +103,26 @@ export async function reviewSubmit(
       status,
     })),
   });
+}
 
-  const json: ReviewSubmitOk = { review, threads };
-  const who = `${review.reviewer.kind}:${review.reviewer.name}`;
-  ctx.print(json, [
-    `Review recorded on round ${round.n} by ${who}: ${review.verdict?.replace("_", " ") ?? "comments only"}`,
-    ...threads.map(
-      (t) => `  #${t.id} ${(t.severity ?? "").padEnd(10)} ${describeAnchor(t.anchor)}`,
-    ),
-    ...(status === "proposed" && threads.length > 0
-      ? [`${threads.length} comment(s) await triage by a human (review.triage_agent_comments)`]
-      : []),
-  ]);
-  return 0;
+/** Where one comment (in review-file form) would be anchored in `round`; throws if it can't be. */
+export async function resolveComment(
+  ctx: Context,
+  feature: Feature,
+  round: Round,
+  comment: unknown,
+): Promise<Anchor> {
+  const [c] = parseSubmission({ comments: [comment] }).comments;
+  return resolverFor(ctx, feature, round).resolve(c!);
+}
+
+function resolverFor(ctx: Context, feature: Feature, round: Round): AnchorResolver {
+  const plan = ctx.store.getPlanVersion(feature.slug, round.planVersion)!;
+  return new AnchorResolver(ctx.jj, round, plan.phases);
 }
 
 /** The requested round, or the latest one; it must still be open. */
-function pickRound(ctx: Context, feature: Feature, requested: string | undefined): Round {
+export function pickRound(ctx: Context, feature: Feature, requested: string | undefined): Round {
   const round = ctx.round(feature, requested);
   if (round.status === "superseded") {
     const latest = ctx.round(feature);

@@ -138,7 +138,7 @@ function preToolUse(input: HookInput, io: Io): number {
   return 0;
 }
 
-/** The human identity an lr command claims with `--as` or `LR_ACTOR`, if any. */
+/** The human identity an lr command claims with `--as` or `LR_ACTOR` (or `lr ui`), if any. */
 export function humanClaim(command: string): string | null {
   const actors = [
     ...command.matchAll(/\bLR_ACTOR=(["']?)([^\s"';&|]+)\1/g),
@@ -147,8 +147,12 @@ export function humanClaim(command: string): string | null {
       : []),
   ].map((m) => m[2]!);
   const human = actors.find((a) => !a.startsWith("agent:"));
-  if (human === undefined) return null;
-  return human.includes(":") ? human : `human:${human}`;
+  if (human !== undefined) return human.includes(":") ? human : `human:${human}`;
+  // `lr ui` acts as a person, the OS user unless told otherwise, whatever shell starts it.
+  if (/(^|[\s;&|(])lr\s+ui\b/.test(command) && actors.length === 0) {
+    return `human:${process.env.USER ?? "unknown"}`;
+  }
+  return null;
 }
 
 /**

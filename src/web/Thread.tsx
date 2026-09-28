@@ -1,5 +1,9 @@
+import { useState } from "react";
+import type { ReplyAction } from "../commands/thread.ts";
 import type { Anchor, Entry } from "../model.ts";
 import type { ThreadView } from "../ui/api.ts";
+import { ApiError, send } from "./api.ts";
+import { useReview } from "./review.tsx";
 import { ActorName, Pill, short, Time } from "./ui.tsx";
 
 export function ThreadList({ threads }: { threads: ThreadView[] }) {
@@ -64,7 +68,92 @@ export function ThreadCard({
           <EntryView key={e.id} entry={e} />
         ))}
       </ol>
+      <ThreadReply thread={t} />
     </article>
+  );
+}
+
+const ACTION_LABEL: Record<ReplyAction, string> = {
+  resolve: "Resolve",
+  reopen: "Reopen",
+  accept: "Accept",
+  dismiss: "Dismiss",
+  addressed: "Mark addressed",
+};
+const ACTION_ORDER: ReplyAction[] = ["accept", "resolve", "reopen", "dismiss", "addressed"];
+
+/** Reply, and the status changes the actor may make; a reply's text goes along with an action. */
+function ThreadReply({ thread: t }: { thread: ThreadView }) {
+  const [open, setOpen] = useState(false);
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const slug = useReview().view.feature.slug;
+
+  const reply = async (action: ReplyAction | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await send("POST", `/features/${encodeURIComponent(slug)}/threads/${t.id}/replies`, {
+        action,
+        body: body.trim() || null,
+      });
+      setBody("");
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const actions = ACTION_ORDER.filter((a) => t.actions.includes(a));
+
+  return (
+    <footer className="thread-reply">
+      {open ? (
+        <textarea
+          // biome-ignore lint/a11y/noAutofocus: opened by clicking Reply
+          autoFocus
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && body.trim()) void reply(null);
+            if (e.key === "Escape") setOpen(false);
+          }}
+          placeholder="Reply"
+          rows={2}
+          aria-label="Reply"
+        />
+      ) : null}
+      <div className="form-row">
+        {open ? (
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || !body.trim()}
+            onClick={() => void reply(null)}
+          >
+            Reply
+          </button>
+        ) : (
+          <button type="button" onClick={() => setOpen(true)}>
+            Reply…
+          </button>
+        )}
+        {actions.map((a) => (
+          <button
+            key={a}
+            type="button"
+            disabled={busy}
+            onClick={() => void reply(a)}
+            title={body.trim() ? "Sends your reply too" : undefined}
+          >
+            {ACTION_LABEL[a]}
+          </button>
+        ))}
+      </div>
+      {error && <p className="form-error">{error}</p>}
+    </footer>
   );
 }
 

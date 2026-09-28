@@ -179,6 +179,19 @@ export const MIGRATIONS = [
   -- up, anchor_stack holds the change and commit ids its anchor refers to.
   ALTER TABLE threads ADD COLUMN anchor_stack TEXT;
   `,
+  `
+  -- A review being written in the UI, as a review file (verdict, body, comments) plus where each
+  -- comment shows. Nobody else sees it until it's submitted, when it becomes a review.
+  CREATE TABLE review_drafts (
+    feature TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    reviewer TEXT NOT NULL,
+    data TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (feature, round, reviewer),
+    FOREIGN KEY (feature, round) REFERENCES rounds(feature, n) ON DELETE CASCADE
+  );
+  `,
 ];
 
 export interface NewComment {
@@ -700,6 +713,39 @@ export class Store {
       .query("SELECT * FROM reviews WHERE feature = ? AND round = ? ORDER BY created_at")
       .all(slug, round) as ReviewRow[];
     return rows.map(reviewFromRow);
+  }
+
+  // ── review drafts (the UI's unsubmitted reviews) ──────────────────────────
+
+  getDraft<T>(slug: string, round: number, reviewer: Actor): T | null {
+    const row = this.db
+      .query("SELECT data FROM review_drafts WHERE feature = ? AND round = ? AND reviewer = ?")
+      .get(slug, round, formatActor(reviewer)) as { data: string } | null;
+    return row && (JSON.parse(row.data) as T);
+  }
+
+  /** The rounds where `reviewer` has a draft. */
+  draftRounds(slug: string, reviewer: Actor): number[] {
+    const rows = this.db
+      .query("SELECT round FROM review_drafts WHERE feature = ? AND reviewer = ? ORDER BY round")
+      .all(slug, formatActor(reviewer)) as { round: number }[];
+    return rows.map((r) => r.round);
+  }
+
+  saveDraft(slug: string, round: number, reviewer: Actor, data: unknown): void {
+    this.db
+      .query(
+        `INSERT INTO review_drafts (feature, round, reviewer, data, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (feature, round, reviewer) DO UPDATE SET data = excluded.data,
+           updated_at = excluded.updated_at`,
+      )
+      .run(slug, round, formatActor(reviewer), JSON.stringify(data), now());
+  }
+
+  deleteDraft(slug: string, round: number, reviewer: Actor): void {
+    this.db
+      .query("DELETE FROM review_drafts WHERE feature = ? AND round = ? AND reviewer = ?")
+      .run(slug, round, formatActor(reviewer));
   }
 
   // ── finalization ──────────────────────────────────────────────────────────

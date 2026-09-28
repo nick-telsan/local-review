@@ -1,7 +1,10 @@
 import type { ChangeSnapshot, Phase, ThreadStatus } from "../model.ts";
 import type { RoundView, ThreadView } from "../ui/api.ts";
-import { useApi } from "./api.ts";
+import { send, useApi } from "./api.ts";
 import { ChangePane } from "./ChangePane.tsx";
+import { AddComment, DraftList } from "./Draft.tsx";
+import { ReviewPanel } from "./ReviewPanel.tsx";
+import { draftsOn, makeReview, ReviewContext, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
 import { ThreadCard, ThreadList } from "./Thread.tsx";
 import {
@@ -48,7 +51,7 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
   const selected = change ? data.round.changes.find((c) => c.changeId === change) : undefined;
 
   return (
-    <>
+    <ReviewContext.Provider value={makeReview(data)}>
       <TopBar slug={slug} view={data} />
       <div className="round-layout">
         <Sidebar view={data} base={base} selected={change} />
@@ -60,6 +63,7 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
               <Link to={`/f/${encodeURIComponent(slug)}`}>Go to the latest round</Link>
             </div>
           )}
+          <DraftBanners view={data} />
           {change === null ? (
             <Overview view={data} />
           ) : selected ? (
@@ -72,6 +76,36 @@ export function RoundPage({ slug, n, change }: { slug: string; n: string; change
           )}
         </main>
       </div>
+    </ReviewContext.Provider>
+  );
+}
+
+/** Drafts the actor can't submit from here: on another round, or on this one now that it's closed. */
+function DraftBanners({ view }: { view: RoundView }) {
+  const review = useReview();
+  const slug = encodeURIComponent(view.feature.slug);
+  return (
+    <>
+      {view.otherDrafts.map((n) => (
+        <div key={n} className="banner">
+          You have an unsubmitted review on round {n}.{" "}
+          <Link to={`/f/${slug}/r/${n}`}>Go to round {n}</Link>
+        </div>
+      ))}
+      {view.draft && !review.canReview && (
+        <div className="banner">
+          Your draft review of round {view.round.n} can't be submitted: the round is{" "}
+          {view.round.status}. Copy anything you still need, then{" "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => void send("DELETE", `${review.path}/draft`)}
+          >
+            discard it
+          </button>
+          .
+        </div>
+      )}
     </>
   );
 }
@@ -105,6 +139,7 @@ function TopBar({ slug, view }: { slug: string; view: RoundView | null }) {
       )}
       <span className="spacer" />
       {view && <span className="muted">as {formatActor(view.actor)}</span>}
+      {view && <ReviewPanel />}
     </header>
   );
 }
@@ -188,6 +223,7 @@ function Sidebar({
 }
 
 function Overview({ view }: { view: RoundView }) {
+  const review = useReview();
   const { round, feature } = view;
   const reviews = view.reviews.filter((r) => r.state === "submitted");
   const general = view.threads.filter((t) => t.placement.on === "feature");
@@ -276,7 +312,10 @@ function Overview({ view }: { view: RoundView }) {
 
       <section>
         <h2>General comments</h2>
-        {general.length === 0 ? <p className="empty">None.</p> : <ThreadList threads={general} />}
+        <ThreadList threads={general} />
+        <DraftList drafts={draftsOn(review.drafts, "feature")} />
+        {general.length === 0 && !review.canReview && <p className="empty">None.</p>}
+        <AddComment label="Add a general comment" target={{}} />
       </section>
 
       {gone.length > 0 && (

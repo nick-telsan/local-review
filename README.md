@@ -11,7 +11,8 @@ squashed into its final shape and handed off as a PR.
 > **Status:** early. The review loop works end to end: plans, snapshots, checks, reviews, the
 > handoff, threaded replies, comments that follow the code from round to round, finalization
 > (squashing and the PR body), and a Claude Code plugin. The web UI (`lr ui`) shows rounds, diffs,
-> and threads, and updates live; commenting from it is next. See [the design](docs/design/data-model.md).
+> and threads, updates live, and lets you review: comment on lines, messages, and changes, reply,
+> resolve, and submit a verdict. See [the design](docs/design/data-model.md).
 
 ## Requirements
 
@@ -50,7 +51,7 @@ lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads (--notes: the author's notes)
 lr diff                            # what changed since your last review, change by change
 lr status
-lr ui                              # the review UI in your browser, live as agents work
+lr ui                              # review in your browser: comment, reply, submit a verdict
 lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 
 # once you've approved with nothing open:
@@ -162,7 +163,7 @@ State lives in `~/.local-review/` (override with `$LOCAL_REVIEW_HOME`).
   with `/local-review:lr-review`.
 - **SessionStart** (hook) tells Claude which feature lr is tracking and what's next, including after
   `/clear` and compaction.
-- **PreToolUse** (hook) asks you before Claude runs lr as a human (`--as human:…`).
+- **PreToolUse** (hook) asks you before Claude runs lr as a human (`--as human:…`, or `lr ui`).
 - **Stop** (hook): if Claude changed the stack during the session and stops without opening a round,
   it gets one reminder to run `lr review create` or say what's left. Turn it off with the plugin's
   `stop_reminder` option in `/config`.

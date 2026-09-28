@@ -1,44 +1,143 @@
-import { Fragment, useState } from "react";
+import { Fragment, type MouseEvent, useEffect, useState } from "react";
 import { type DiffLine, type FileDiff, filePath } from "../patch.ts";
-import type { ThreadView } from "../ui/api.ts";
+import type { DraftComment, Placement, ThreadView } from "../ui/api.ts";
+import { CommentForm } from "./CommentForm.tsx";
+import { DraftCard } from "./Draft.tsx";
+import { draftsOn, useReview } from "./review.tsx";
 import { ThreadCard } from "./Thread.tsx";
 
 /** Diffs longer than this start collapsed. */
 const COLLAPSE_LINES = 800;
 
-type LineThread = ThreadView & { placement: Extract<ThreadView["placement"], { on: "line" }> };
+type Side = "old" | "new";
+type OnLines = Extract<Placement, { on: "line" }>;
+type Item =
+  | { kind: "thread"; thread: ThreadView; at: OnLines }
+  | { kind: "draft"; draft: DraftComment; at: OnLines };
 
-function isLineThread(t: ThreadView): t is LineThread {
-  return t.placement.on === "line";
+/** Lines picked for a new comment: `anchor` is where the pick started, `head` where it is now. */
+interface Selection {
+  side: Side;
+  anchor: number;
+  head: number;
 }
 
-export function FileDiffView({ file, threads }: { file: FileDiff; threads: ThreadView[] }) {
+const lineOn = (l: DiffLine, side: Side) => (side === "old" ? l.oldLine : l.newLine);
+const range = (s: Selection): [number, number] => [
+  Math.min(s.anchor, s.head),
+  Math.max(s.anchor, s.head),
+];
+
+export function FileDiffView({
+  file,
+  change,
+  threads,
+}: {
+  file: FileDiff;
+  change: string;
+  threads: ThreadView[];
+}) {
+  const review = useReview();
   const path = filePath(file);
   const lineCount = file.hunks.reduce((n, h) => n + h.lines.length, 0);
   const [open, setOpen] = useState(lineCount <= COLLAPSE_LINES);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [dragging, setDragging] = useState(false);
 
-  // A thread shows after the last line it covers, on the side it was made on.
-  const mine = threads
-    .filter(isLineThread)
-    .filter((t) => t.placement.path === (t.placement.side === "new" ? file.newPath : file.oldPath));
-  const at = new Map<string, LineThread[]>();
-  const shown = new Set<number>();
-  for (const h of file.hunks) {
-    for (const l of h.lines) {
-      for (const side of ["old", "new"] as const) {
-        const n = side === "old" ? l.oldLine : l.newLine;
-        if (n === null) continue;
-        for (const t of mine) {
-          if (t.placement.side === side && t.placement.lines[1] === n && !shown.has(t.id)) {
-            shown.add(t.id);
-            at.set(key(l), [...(at.get(key(l)) ?? []), t]);
-          }
-        }
-      }
-    }
+  useEffect(() => {
+    if (!dragging) return;
+    const stop = () => setDragging(false);
+    addEventListener("mouseup", stop);
+    return () => removeEventListener("mouseup", stop);
+  }, [dragging]);
+
+  const onThisFile = (p: OnLines) => p.path === (p.side === "new" ? file.newPath : file.oldPath);
+  const items: Item[] = [
+    ...threads.flatMap((t): Item[] =>
+      t.placement.on === "line" && onThisFile(t.placement)
+        ? [{ kind: "thread", thread: t, at: t.placement }]
+        : [],
+    ),
+    ...draftsOn(review.drafts, "line", (p) => p.changeId === change && onThisFile(p)).map(
+      (d): Item => ({ kind: "draft", draft: d, at: d.placement }),
+    ),
+  ];
+
+  // Each comment shows after the last line it covers, on its side; the rest, above the diff.
+  const rows = file.hunks.flatMap((h) => h.lines);
+  const after = new Map<DiffLine, Item[]>();
+  const elsewhere: Item[] = [];
+  for (const item of items) {
+    const row = rows.find((l) => lineOn(l, item.at.side) === item.at.lines[1]);
+    if (row) after.set(row, [...(after.get(row) ?? []), item]);
+    else elsewhere.push(item);
   }
-  // Comments on lines the diff doesn't show (lr lets reviewers comment on any line of the file).
-  const elsewhere = mine.filter((t) => !shown.has(t.id));
+
+  /** The text of new-side lines a..b, if the diff shows them all (what a suggestion replaces). */
+  const textOf = (side: Side, [a, b]: [number, number]): string | null => {
+    if (side === "old") return null;
+    const lines = rows.filter((l) => l.newLine !== null && l.newLine >= a && l.newLine <= b);
+    return lines.length === b - a + 1 ? lines.map((l) => l.text).join("\n") : null;
+  };
+
+  const pick = (side: Side, n: number, extend: boolean) => {
+    setSelection(
+      extend && selection?.side === side ? { ...selection, head: n } : { side, anchor: n, head: n },
+    );
+  };
+  const numberCell = (l: DiffLine, side: Side) => {
+    const n = lineOn(l, side);
+    if (n === null || !review.canReview) return <td className="num">{n ?? ""}</td>;
+    return (
+      <td className="num">
+        <button
+          type="button"
+          className="num-button"
+          title="Comment on this line (drag or shift-click for several)"
+          onMouseDown={(e: MouseEvent) => {
+            if (e.button !== 0) return;
+            e.preventDefault(); // no text selection while dragging
+            pick(side, n, e.shiftKey);
+            setDragging(true);
+          }}
+          onMouseEnter={() => {
+            if (dragging && selection?.side === side) setSelection({ ...selection, head: n });
+          }}
+          // Keyboard activation (a mouse click was handled on mousedown).
+          onClick={(e) => e.detail === 0 && pick(side, n, e.shiftKey)}
+        >
+          {n}
+        </button>
+      </td>
+    );
+  };
+
+  const picked = selection && range(selection);
+  const isPicked = (l: DiffLine) => {
+    if (!selection || !picked) return false;
+    const n = lineOn(l, selection.side);
+    return n !== null && n >= picked[0] && n <= picked[1];
+  };
+  const isCommented = (l: DiffLine) =>
+    items.some((i) => {
+      const n = lineOn(l, i.at.side);
+      return n !== null && n >= i.at.lines[0] && n <= i.at.lines[1];
+    });
+  const formAfter =
+    selection && picked && !dragging
+      ? rows.find((l) => lineOn(l, selection.side) === picked[1])
+      : undefined;
+
+  const renderItem = (item: Item) =>
+    item.kind === "thread" ? (
+      <ThreadCard key={`t${item.thread.id}`} thread={item.thread} />
+    ) : (
+      <DraftCard
+        key={item.draft.id}
+        draft={item.draft}
+        suggestFrom={textOf(item.at.side, item.at.lines)}
+      />
+    );
 
   return (
     <section className="file" id={`file-${encodeURIComponent(path)}`}>
@@ -57,7 +156,7 @@ export function FileDiffView({ file, threads }: { file: FileDiff; threads: Threa
           {file.status === "renamed" ? `${file.oldPath} → ${file.newPath}` : path}
         </span>
         <span className="spacer" />
-        {mine.length > 0 && <span className="count">{mine.length}</span>}
+        {items.length > 0 && <span className="count">{items.length}</span>}
         <span className="stat-add">+{file.added}</span>
         <span className="stat-del">−{file.removed}</span>
       </header>
@@ -73,11 +172,7 @@ export function FileDiffView({ file, threads }: { file: FileDiff; threads: Threa
             <p className="file-note">Empty file.</p>
           )}
           {elsewhere.length > 0 && (
-            <div className="thread-list outside">
-              {elsewhere.map((t) => (
-                <ThreadCard key={t.id} thread={t} showAnchor />
-              ))}
-            </div>
+            <div className="thread-list outside">{elsewhere.map(renderItem)}</div>
           )}
           {file.hunks.length > 0 && (
             <table className="diff">
@@ -95,10 +190,14 @@ export function FileDiffView({ file, threads }: { file: FileDiff; threads: Threa
                       </td>
                     </tr>
                     {h.lines.map((l) => (
-                      <Fragment key={key(l)}>
-                        <tr className={`line ${l.kind}${inRange(mine, l) ? " commented" : ""}`}>
-                          <td className="num">{l.oldLine ?? ""}</td>
-                          <td className="num">{l.newLine ?? ""}</td>
+                      <Fragment key={`${l.oldLine ?? ""}:${l.newLine ?? ""}`}>
+                        <tr
+                          className={`line ${l.kind}${isCommented(l) ? " commented" : ""}${
+                            isPicked(l) ? " picked" : ""
+                          }`}
+                        >
+                          {numberCell(l, "old")}
+                          {numberCell(l, "new")}
                           <td className="code">
                             <span className="sign">
                               {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
@@ -111,12 +210,36 @@ export function FileDiffView({ file, threads }: { file: FileDiff; threads: Threa
                             )}
                           </td>
                         </tr>
-                        {at.get(key(l)) && (
+                        {after.get(l) && (
                           <tr className="inline-threads">
                             <td colSpan={3}>
-                              {at.get(key(l))!.map((t) => (
-                                <ThreadCard key={t.id} thread={t} />
-                              ))}
+                              <div className="thread-list">{after.get(l)!.map(renderItem)}</div>
+                            </td>
+                          </tr>
+                        )}
+                        {formAfter === l && selection && picked && (
+                          <tr className="inline-threads">
+                            <td colSpan={3}>
+                              <div className="thread draft">
+                                <CommentForm
+                                  key={`${selection.side}:${picked.join("-")}`}
+                                  suggestFrom={textOf(selection.side, picked)}
+                                  submitLabel="Add to review"
+                                  onSubmit={async (v) => {
+                                    await review.add({
+                                      change,
+                                      path: (selection.side === "new"
+                                        ? file.newPath
+                                        : file.oldPath)!,
+                                      lines: picked,
+                                      side: selection.side,
+                                      ...v,
+                                    });
+                                    setSelection(null);
+                                  }}
+                                  onCancel={() => setSelection(null)}
+                                />
+                              </div>
                             </td>
                           </tr>
                         )}
@@ -131,17 +254,4 @@ export function FileDiffView({ file, threads }: { file: FileDiff; threads: Threa
       )}
     </section>
   );
-}
-
-function key(l: DiffLine): string {
-  return `${l.oldLine ?? ""}:${l.newLine ?? ""}`;
-}
-
-/** Whether a line is inside a comment's range, on the side the comment was made on. */
-function inRange(threads: LineThread[], l: DiffLine): boolean {
-  return threads.some((t) => {
-    const n = t.placement.side === "old" ? l.oldLine : l.newLine;
-    const [a, b] = t.placement.lines;
-    return n !== null && n >= a && n <= b;
-  });
 }

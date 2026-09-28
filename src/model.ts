@@ -115,6 +115,7 @@ export interface Review {
   id: string;
   round: number;
   reviewer: Actor;
+  /** Always "submitted": the UI's drafts live apart (`review_drafts`) until they're submitted. */
   state: "draft" | "submitted";
   /** null = comments only. */
   verdict: Verdict | null;

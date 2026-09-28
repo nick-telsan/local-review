@@ -2,6 +2,13 @@
 import { join } from "node:path";
 import { refAt } from "../anchors.ts";
 import { nextStep } from "../commands/status.ts";
+import {
+  pickRound,
+  type ReviewSubmitOk,
+  recordReview,
+  resolveComment,
+} from "../commands/submit.ts";
+import { allowedActions, applyReply, type ReplyAction, type ReplyOk } from "../commands/thread.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
 import type {
@@ -12,6 +19,7 @@ import type {
   PlanVersion,
   Review,
   Round,
+  Severity,
   Thread,
   ThreadStatus,
   Verdict,
@@ -64,6 +72,35 @@ export type Placement =
 
 export interface ThreadView extends Thread {
   placement: Placement;
+  /** What the UI's actor may do to it now. */
+  actions: ReplyAction[];
+}
+
+/** A comment in a draft review, in review-file form (see "Review submissions" in the design). */
+export interface DraftCommentInput {
+  change?: string;
+  path?: string;
+  lines?: [number, number];
+  side?: "old" | "new";
+  message?: boolean;
+  severity?: Severity | null;
+  body: string;
+  suggestion?: string | null;
+}
+
+export interface DraftComment {
+  id: string;
+  comment: DraftCommentInput;
+  /** Where it shows, checked against the round when it was added. */
+  placement: Placement;
+}
+
+/** The UI's actor's unsubmitted review of a round. Nobody else sees it. */
+export interface ReviewDraft {
+  round: number;
+  verdict: Verdict | null;
+  body: string | null;
+  comments: DraftComment[];
 }
 
 const UNSETTLED: ThreadStatus[] = ["proposed", "open", "addressed"];
@@ -88,6 +125,10 @@ export interface RoundView {
    * round: the threads made in it, where they were made.
    */
   threads: ThreadView[];
+  /** The actor's draft review of this round, if any. */
+  draft: ReviewDraft | null;
+  /** Other rounds where the actor has a draft (e.g. one superseded while they wrote it). */
+  otherDrafts: number[];
 }
 
 /** `GET /api/features/:slug/rounds/:n/changes/:changeId` */
@@ -135,7 +176,14 @@ export function roundView(ctx: Context, slug: string, n: string): RoundView {
     } else if (t.createdInRound === round.n) {
       at = { anchor: t.originalAnchor, anchorState: "current" };
     }
-    if (at) threads.push({ ...t, ...at, placement: place(at, round) });
+    if (at) {
+      threads.push({
+        ...t,
+        ...at,
+        placement: place(at, round),
+        actions: allowedActions(ctx.actor, t),
+      });
+    }
   }
 
   return {
@@ -150,6 +198,8 @@ export function roundView(ctx: Context, slug: string, n: string): RoundView {
     checks: ctx.store.roundChecks(slug, round.n),
     reviews: ctx.store.listReviews(slug, round.n),
     threads,
+    draft: ctx.store.getDraft<ReviewDraft>(slug, round.n, ctx.actor),
+    otherDrafts: ctx.store.draftRounds(slug, ctx.actor).filter((r) => r !== round.n),
   };
 }
 
@@ -171,6 +221,131 @@ export async function changeView(
     ? await cached.text()
     : await ctx.jj.at(round.jjOpId).diffGit(change.commitId);
   return { changeId, commitId: change.commitId, files: parsePatch(patch) };
+}
+
+// ── Writes, all as `ctx.actor` ────────────────────────────────────────────────
+
+/** `POST …/draft/comments`: check where a comment goes, then add it to the actor's draft. */
+export async function addDraftComment(
+  ctx: Context,
+  slug: string,
+  n: string,
+  input: DraftCommentInput,
+): Promise<ReviewDraft> {
+  const { feature, round, draft } = openDraft(ctx, slug, n);
+  draft.comments.push({ id: Bun.randomUUIDv7(), ...(await checked(ctx, feature, round, input)) });
+  ctx.store.saveDraft(slug, round.n, ctx.actor, draft);
+  return draft;
+}
+
+/** `PUT …/draft/comments/:id` */
+export async function updateDraftComment(
+  ctx: Context,
+  slug: string,
+  n: string,
+  id: string,
+  input: DraftCommentInput,
+): Promise<ReviewDraft> {
+  const { feature, round, draft } = openDraft(ctx, slug, n);
+  const i = draftIndex(draft, id);
+  draft.comments[i] = { id, ...(await checked(ctx, feature, round, input)) };
+  ctx.store.saveDraft(slug, round.n, ctx.actor, draft);
+  return draft;
+}
+
+/** `DELETE …/draft/comments/:id` */
+export function deleteDraftComment(ctx: Context, slug: string, n: string, id: string): ReviewDraft {
+  const { round, draft } = openDraft(ctx, slug, n);
+  draft.comments.splice(draftIndex(draft, id), 1);
+  ctx.store.saveDraft(slug, round.n, ctx.actor, draft);
+  return draft;
+}
+
+/** `PUT …/draft`: the verdict and summary, saved as they're written. */
+export function saveDraftSummary(
+  ctx: Context,
+  slug: string,
+  n: string,
+  summary: { verdict: Verdict | null; body: string | null },
+): ReviewDraft {
+  const { round, draft } = openDraft(ctx, slug, n);
+  const saved = { ...draft, verdict: summary.verdict ?? null, body: summary.body || null };
+  ctx.store.saveDraft(slug, round.n, ctx.actor, saved);
+  return saved;
+}
+
+/** `DELETE …/draft`: throw the draft away. Works on any round, e.g. one superseded meanwhile. */
+export function discardDraft(ctx: Context, slug: string, n: string): { ok: true } {
+  const round = ctx.round(getFeature(ctx, slug), n);
+  ctx.store.deleteDraft(slug, round.n, ctx.actor);
+  return { ok: true };
+}
+
+/** `POST …/draft/submit`: record the draft as a review, exactly as `lr review submit` would. */
+export async function submitDraft(
+  ctx: Context,
+  slug: string,
+  n: string,
+  summary: { verdict: Verdict | null; body: string | null },
+): Promise<ReviewSubmitOk> {
+  const { feature, round, draft } = openDraft(ctx, slug, n);
+  const data: Record<string, unknown> = { comments: draft.comments.map((c) => c.comment) };
+  if (summary.verdict) data.verdict = summary.verdict;
+  if (summary.body?.trim()) data.body = summary.body;
+  const ok = await recordReview(ctx, feature, round, data);
+  ctx.store.deleteDraft(slug, round.n, ctx.actor);
+  return ok;
+}
+
+/** `POST /api/features/:slug/threads/:id/replies`, like `lr reply`. */
+export function replyToThread(
+  ctx: Context,
+  slug: string,
+  id: string,
+  opts: { action?: ReplyAction | null; body?: string | null },
+): ReplyOk {
+  const feature = getFeature(ctx, slug);
+  if (!/^\d+$/.test(id)) throw new LrError(`no thread #${id} in ${slug}`);
+  return {
+    thread: applyReply(ctx, feature, Number(id), {
+      action: opts.action ?? null,
+      body: opts.body ?? null,
+    }),
+  };
+}
+
+/** The feature, its round (which must be open for review), and the actor's draft of it. */
+function openDraft(ctx: Context, slug: string, n: string) {
+  const feature = getFeature(ctx, slug);
+  const round = pickRound(ctx, feature, n);
+  const draft = ctx.store.getDraft<ReviewDraft>(slug, round.n, ctx.actor) ?? {
+    round: round.n,
+    verdict: null,
+    body: null,
+    comments: [],
+  };
+  return { feature, round, draft };
+}
+
+function draftIndex(draft: ReviewDraft, id: string): number {
+  const i = draft.comments.findIndex((c) => c.id === id);
+  if (i < 0) throw new LrError(`no draft comment ${id}`);
+  return i;
+}
+
+/** The comment, checked the way `lr review submit` checks it, and where it shows. */
+async function checked(
+  ctx: Context,
+  feature: Feature,
+  round: Round,
+  input: DraftCommentInput,
+): Promise<Omit<DraftComment, "id">> {
+  // Drop empty fields, so the stored comment is exactly what a review file would say.
+  const comment = Object.fromEntries(
+    Object.entries(input).filter(([, v]) => v !== null && v !== undefined && v !== false),
+  ) as DraftCommentInput;
+  const anchor = await resolveComment(ctx, feature, round, comment);
+  return { comment, placement: place({ anchor, anchorState: "current" }, round) };
 }
 
 /** Where a thread shows, given its anchor in `round`. */

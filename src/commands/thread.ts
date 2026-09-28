@@ -2,7 +2,7 @@ import { formatActor } from "../actor.ts";
 import { describeAnchor } from "../anchors.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
-import type { Actor, Entry, Thread, ThreadStatus } from "../model.ts";
+import type { Actor, Entry, Feature, Thread, ThreadStatus } from "../model.ts";
 
 export type ReplyAction = "addressed" | "resolve" | "dismiss" | "reopen" | "accept";
 
@@ -39,7 +39,24 @@ export async function reply(
     );
   }
   const feature = ctx.feature();
-  const thread = ctx.store.getThread(feature.slug, Number(id));
+  const updated = applyReply(ctx, feature, Number(id), opts);
+  const change = updated.entries.at(-1)!.statusChange;
+  const json: ReplyOk = { thread: updated };
+  ctx.print(
+    json,
+    change ? `#${id}: ${change.from} → ${change.to}` : `Replied to #${id} (${updated.status})`,
+  );
+  return 0;
+}
+
+/** Add `ctx.actor`'s reply and/or status change to a thread, under the rules in ACTIONS. */
+export function applyReply(
+  ctx: Context,
+  feature: Feature,
+  id: number,
+  opts: { action: ReplyAction | null; body: string | null },
+): Thread {
+  const thread = ctx.store.getThread(feature.slug, id);
   if (!thread) throw new LrError(`no thread #${id} in ${feature.slug}`);
 
   let statusChange: Entry["statusChange"] = null;
@@ -80,7 +97,7 @@ export async function reply(
     );
   }
 
-  const updated = ctx.store.addEntry(feature.slug, thread.id, {
+  return ctx.store.addEntry(feature.slug, thread.id, {
     id: Bun.randomUUIDv7(),
     author: ctx.actor,
     body,
@@ -89,14 +106,16 @@ export async function reply(
     round: ctx.store.latestRound(feature.slug)?.n ?? null,
     createdAt: new Date().toISOString(),
   });
-  const json: ReplyOk = { thread: updated };
-  ctx.print(
-    json,
-    statusChange
-      ? `#${id}: ${statusChange.from} → ${statusChange.to}`
-      : `Replied to #${id} (${updated.status})`,
-  );
-  return 0;
+}
+
+/** The actions `actor` may take on `thread` now (what `applyReply` would accept). */
+export function allowedActions(actor: Actor, thread: Thread): ReplyAction[] {
+  return (Object.keys(ACTIONS) as ReplyAction[]).filter((action) => {
+    const rule = ACTIONS[action];
+    if (!rule.from.includes(thread.status)) return false;
+    if (actor.kind === "human" || rule.who === "anyone") return true;
+    return rule.who === "reviewer" && isReviewer(actor, thread);
+  });
 }
 
 const same = (a: Actor, b: Actor) => formatActor(a) === formatActor(b);

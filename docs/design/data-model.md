@@ -299,7 +299,7 @@ interface Review {
   id: string;
   round: number;
   reviewer: Actor;
-  state: "draft" | "submitted"; // threads in a draft review are invisible to others until submit
+  state: "draft" | "submitted"; // always "submitted": drafts are kept apart until then (below)
   verdict: "changes_requested" | "approved" | null; // null = comments only
   body: string | null; // markdown summary
   createdAt: string;
@@ -312,6 +312,14 @@ decide the round. A reviewer can submit more than one review per round.
 
 "Approved with comments" is never stored. It's derived: `verdict = approved` and at least one
 thread is `open`.
+
+**Drafts.** In the UI, a reviewer's comments collect in a draft (`review_drafts`, one per reviewer
+and round) until they submit it with a verdict and summary. A draft is stored as a review file
+(the same JSON `lr review submit -F` takes), plus where each comment shows. Each comment is checked
+against the round's snapshot when it's added, and submitting goes through `lr review submit`'s own
+validation and recording. Nobody else sees a draft: not the handoff, `lr threads`, or `lr status`.
+A draft on a round that's superseded before it's submitted can only be discarded; its comments
+aren't carried to the new round.
 
 ### Thread
 
@@ -749,7 +757,8 @@ it's tested.
   and next step, which becomes session context. It also records the stack as the session found it.
   Resume and compaction keep the same record.
 - **PreToolUse (Bash):** if a command runs lr as a human (`--as human:…`, `--as <name>`,
-  `LR_ACTOR=<human>`), it returns `ask` so the developer confirms.
+  `LR_ACTOR=<human>`, or `lr ui`, which acts as the OS user), it returns `ask` so the developer
+  confirms.
 - **Stop:** if the feature is `implementing` or `revising`, and the stack differs from both how the
   session found it and the latest round, it blocks the stop once (exit 2) with a reminder: open a
   round with `lr review create`, or say what's left. It fires once per stack state, and never while
@@ -765,9 +774,10 @@ platform's opener) at the current feature's latest round. It runs until Ctrl-C. 
 The standalone binary embeds the page; from source, Bun bundles `src/web/index.html` at startup.
 
 It acts as a person: `--as` or `$LR_ACTOR` if either names a human, else the OS user, never the
-coding agent whose shell started it. For now it only reads.
+coding agent whose shell started it. It writes through the same code as the CLI: drafts become
+reviews via `lr review submit`'s path, and replies go through `lr reply`'s rules.
 
-**Security.** The API can read reviews (and will write them), so any page open in the browser must
+**Security.** The API reads and writes reviews, so any page open in the browser must
 not reach it. The page itself is public, since it's the same bundle for everyone. The API needs a
 random token, sent as `Authorization: Bearer`. The link `lr ui` prints carries it as `?t=`; the page
 keeps it in `localStorage` (per port) and takes it out of the address bar. Only the event stream
@@ -786,6 +796,16 @@ server-sent event stream when it moves. The page then refetches what it shows.
   reviews, and threads, each with a `placement`.
 - `GET /api/features/:slug/rounds/:n/changes/:change`: the change's diff, parsed into files, hunks,
   and lines, from the round's cached patch (or jj, if the cache is gone).
+- `POST …/rounds/:n/draft/comments`, `PUT`/`DELETE …/draft/comments/:id`: the actor's draft comments,
+  in review-file form (`change`, `path`, `lines`, `side`, `message`, `severity`, `body`,
+  `suggestion`).
+- `PUT …/rounds/:n/draft` (verdict and summary, saved as they're written), `DELETE …/draft`
+  (discard), `POST …/draft/submit` (record it as a review).
+- `POST /api/features/:slug/threads/:id/replies` (`action`, `body`): like `lr reply`. The round view
+  lists each thread's `actions`: what the actor may do to it now.
+
+Writes push `changed` to other open pages too, since the server's own writes don't move
+`data_version` for its own connection.
 
 **Which threads a round shows, and where.** The latest round shows the threads placed in it, every
 unsettled one, and any with activity in it. Outdated threads stay anchored in the round where they

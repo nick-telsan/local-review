@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import type { ReviewSubmitOk } from "../src/commands/submit.ts";
+import type { ReplyOk } from "../src/commands/thread.ts";
 import type { UiOk } from "../src/commands/ui.ts";
 import { Context } from "../src/context.ts";
 import { repoDir } from "../src/paths.ts";
-import type { ChangeView, FeaturesOk, RoundView } from "../src/ui/api.ts";
+import type { ChangeView, FeaturesOk, ReviewDraft, RoundView } from "../src/ui/api.ts";
 import { POLL_MS, startUi, type UiServer } from "../src/ui/server.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
 import { lr } from "./lr.ts";
@@ -215,6 +217,162 @@ describe("the API", () => {
       expect(res.status).toBe(status);
       expect(((await res.json()) as { error: string }).error).toContain(message);
     }
+  });
+});
+
+async function send<T>(method: string, path: string, data?: unknown) {
+  const res = await api(path, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: data === undefined ? undefined : JSON.stringify(data),
+  });
+  return { status: res.status, data: (await res.json()) as T & { error?: string } };
+}
+
+describe("drafting a review", () => {
+  const draftPath = "/features/feat/rounds/1/draft";
+
+  test("comments collect in a draft only its author sees, then submit as one review", async () => {
+    const added = await send<ReviewDraft>("POST", `${draftPath}/comments`, {
+      change: c1,
+      path: "db.ts",
+      lines: [2, 3],
+      severity: "blocking",
+      body: "NOT NULL.",
+      suggestion: "B\nC",
+    });
+    expect(added.status).toBe(200);
+    const [first] = added.data.comments;
+    expect(first!.placement).toEqual({
+      on: "line",
+      changeId: c1,
+      path: "db.ts",
+      side: "new",
+      lines: [2, 3],
+    });
+    await send("POST", `${draftPath}/comments`, { change: c1, message: true, body: "Subject?" });
+    await send("PUT", draftPath, { verdict: "changes_requested", body: "Close." });
+
+    const view = await json<RoundView>("/features/feat/rounds/1");
+    expect(view.draft).toMatchObject({ verdict: "changes_requested", body: "Close." });
+    expect(view.draft!.comments.map((c) => c.placement.on)).toEqual(["line", "message"]);
+    // Nobody else sees it: not the CLI, not another person's view.
+    expect((await lr(repo, "threads")).out).toBe("No proposed/open/addressed threads.");
+    const other = ctx.with({ actor: { kind: "human", name: "sam" } });
+    const { roundView } = await import("../src/ui/api.ts");
+    expect(roundView(other, "feat", "1").draft).toBeNull();
+
+    const edited = await send<ReviewDraft>("PUT", `${draftPath}/comments/${first!.id}`, {
+      change: c1,
+      path: "db.ts",
+      lines: [2, 2],
+      body: "Just this one.",
+    });
+    expect(edited.data.comments[0]).toMatchObject({
+      id: first!.id,
+      comment: { change: c1, path: "db.ts", lines: [2, 2], body: "Just this one." },
+    });
+
+    const submitted = await send<ReviewSubmitOk>("POST", `${draftPath}/submit`, {
+      verdict: "changes_requested",
+      body: "Close.",
+    });
+    expect(submitted.status).toBe(200);
+    expect(submitted.data.review).toMatchObject({
+      reviewer: { kind: "human", name: "nick" },
+      verdict: "changes_requested",
+      body: "Close.",
+    });
+    expect(submitted.data.threads.map((t) => t.entries[0]!.body)).toEqual([
+      "Just this one.",
+      "Subject?",
+    ]);
+    const after = await json<RoundView>("/features/feat/rounds/1");
+    expect(after.draft).toBeNull();
+    expect(after.threads.map((t) => t.actions)).toEqual([
+      ["addressed", "resolve", "dismiss"],
+      ["addressed", "resolve", "dismiss"],
+    ]);
+  });
+
+  test("a comment is checked when it's added, the way lr review submit checks it", async () => {
+    const bad = await send("POST", `${draftPath}/comments`, {
+      change: c1,
+      path: "nope.ts",
+      lines: [1, 1],
+      body: "x",
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.data.error).toContain("nope.ts");
+    const shape = await send("POST", `${draftPath}/comments`, { change: c1, lines: [1, 1] });
+    expect(shape.data.error).toContain("body: required");
+    const missing = await send("DELETE", `${draftPath}/comments/nope`);
+    expect(missing.data.error).toContain("no draft comment nope");
+  });
+
+  test("deleting comments, discarding, and an empty submit", async () => {
+    const { data } = await send<ReviewDraft>("POST", `${draftPath}/comments`, { body: "Hm." });
+    const deleted = await send<ReviewDraft>(
+      "DELETE",
+      `${draftPath}/comments/${data.comments[0]!.id}`,
+    );
+    expect(deleted.data.comments).toEqual([]);
+    const empty = await send("POST", `${draftPath}/submit`, { verdict: null, body: "" });
+    expect(empty.data.error).toContain("review is empty");
+
+    await send("POST", `${draftPath}/comments`, { body: "Again." });
+    expect((await send<{ ok: true }>("DELETE", draftPath)).data).toEqual({ ok: true });
+    expect((await json<RoundView>("/features/feat/rounds/1")).draft).toBeNull();
+  });
+
+  test("a draft on a round that's since superseded can't be submitted, only discarded", async () => {
+    await send("POST", `${draftPath}/comments`, { body: "Old." });
+    await repo.write("db.ts", "a\nB\nc\n");
+    await repo.jj("squash", "--into", c1, "db.ts");
+    expect((await lr(repo, "review", "create")).code).toBe(0);
+
+    expect((await json<RoundView>("/features/feat/rounds/2")).otherDrafts).toEqual([1]);
+    const late = await send("POST", `${draftPath}/submit`, { verdict: null, body: null });
+    expect(late.data.error).toContain("round 1 was superseded; review round 2 instead");
+    expect((await send("DELETE", draftPath)).status).toBe(200);
+    expect((await json<RoundView>("/features/feat/rounds/2")).otherDrafts).toEqual([]);
+  });
+
+  test("bodies must be JSON", async () => {
+    const res = await api(`${draftPath}/comments`, { method: "POST", body: "{" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("must be JSON");
+  });
+});
+
+describe("replying", () => {
+  test("replies and status changes follow lr reply's rules", async () => {
+    await review([{ change: c1, body: "Why?" }]);
+    const path = "/features/feat/threads/1/replies";
+    const replied = await send<ReplyOk>("POST", path, { body: "Asking again." });
+    expect(replied.data.thread.entries.at(-1)).toMatchObject({ body: "Asking again." });
+    const resolved = await send<ReplyOk>("POST", path, { action: "resolve" });
+    expect(resolved.data.thread.status).toBe("resolved");
+    expect((await json<RoundView>("/features/feat/rounds/1")).threads[0]!.actions).toEqual([
+      "reopen",
+    ]);
+    const wrong = await send("POST", path, { action: "accept" });
+    expect(wrong.data.error).toContain("#1 is resolved");
+    expect((await send("POST", "/features/feat/threads/x/replies", {})).data.error).toContain(
+      "no thread #x",
+    );
+  });
+
+  test("an agent only gets the actions lr reply would allow it", async () => {
+    await review([{ change: c1, body: "Why?" }]);
+    const { allowedActions } = await import("../src/commands/thread.ts");
+    const thread = ctx.store.getThread("feat", 1)!;
+    expect(allowedActions({ kind: "agent", name: "codex" }, thread)).toEqual(["addressed"]);
+    expect(allowedActions({ kind: "human", name: "nick" }, thread)).toEqual([
+      "addressed",
+      "resolve",
+      "dismiss",
+    ]);
   });
 });
 

@@ -1,9 +1,23 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Server } from "bun";
+import type { ReplyAction } from "../commands/thread.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
+import type { Verdict } from "../model.ts";
 import page from "../web/index.html";
-import { changeView, features, roundView } from "./api.ts";
+import {
+  addDraftComment,
+  changeView,
+  type DraftCommentInput,
+  deleteDraftComment,
+  discardDraft,
+  features,
+  replyToThread,
+  roundView,
+  saveDraftSummary,
+  submitDraft,
+  updateDraftComment,
+} from "./api.ts";
 
 /** How often the server checks whether another process (the CLI, an agent) changed lr's state. */
 export const POLL_MS = 500;
@@ -16,7 +30,8 @@ export interface UiServer {
   stop(): Promise<void>;
 }
 
-type Handler = (req: Request & { params: Record<string, string> }) => unknown;
+type ApiRequest = Request & { params: Record<string, string> };
+type Handler = (req: ApiRequest) => unknown;
 
 /**
  * Serve the web UI and its API on 127.0.0.1. The page itself is public (it's the same bundle for
@@ -33,7 +48,7 @@ export function startUi(
   const events = new Events(ctx);
 
   const api = (handler: Handler, streaming = false) => {
-    return async (req: Request & { params: Record<string, string> }) => {
+    return async (req: ApiRequest) => {
       const refused = refuse(req, server.port!, token, streaming);
       if (refused) return refused;
       try {
@@ -46,6 +61,14 @@ export function startUi(
       }
     };
   };
+  /** A write: its JSON body is passed along, and other open pages hear about the change. */
+  const write = <T>(handler: (req: ApiRequest, body: T) => unknown) =>
+    api(async (req) => {
+      const result = await handler(req, await body<T>(req));
+      events.notify();
+      return result;
+    });
+  const round = (req: ApiRequest) => [ctx, req.params.slug!, req.params.n!] as const;
 
   const server: Server<undefined> = Bun.serve({
     hostname: "127.0.0.1",
@@ -60,6 +83,31 @@ export function startUi(
       "/api/features/:slug/rounds/:n/changes/:change": api((req) =>
         changeView(ctx, req.params.slug!, req.params.n!, req.params.change!),
       ),
+      "/api/features/:slug/rounds/:n/draft": {
+        PUT: write<{ verdict: Verdict | null; body: string | null }>((req, b) =>
+          saveDraftSummary(...round(req), b),
+        ),
+        DELETE: write((req) => discardDraft(...round(req))),
+      },
+      "/api/features/:slug/rounds/:n/draft/comments": {
+        POST: write<DraftCommentInput>((req, b) => addDraftComment(...round(req), b)),
+      },
+      "/api/features/:slug/rounds/:n/draft/comments/:id": {
+        PUT: write<DraftCommentInput>((req, b) =>
+          updateDraftComment(...round(req), req.params.id!, b),
+        ),
+        DELETE: write((req) => deleteDraftComment(...round(req), req.params.id!)),
+      },
+      "/api/features/:slug/rounds/:n/draft/submit": {
+        POST: write<{ verdict: Verdict | null; body: string | null }>((req, b) =>
+          submitDraft(...round(req), b),
+        ),
+      },
+      "/api/features/:slug/threads/:id/replies": {
+        POST: write<{ action?: ReplyAction | null; body?: string | null }>((req, b) =>
+          replyToThread(ctx, req.params.slug!, req.params.id!, b),
+        ),
+      },
       // EventSource can't send headers, so this one takes the token as `?t=`.
       "/api/events": api((req) => {
         server.timeout(req, 0);
@@ -80,6 +128,17 @@ export function startUi(
       await server.stop(true);
     },
   };
+}
+
+/** The request's JSON body; `{}` when it has none (e.g. a DELETE). */
+async function body<T>(req: Request): Promise<T> {
+  const text = await req.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new LrError("the request body must be JSON");
+  }
 }
 
 function refuse(req: Request, port: number, token: string, queryToken: boolean): Response | null {
