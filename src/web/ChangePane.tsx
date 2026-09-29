@@ -114,7 +114,7 @@ export function ChangePane({
         <DraftList
           drafts={draftsOn(review.drafts, "change", (p) => p.changeId === change.changeId)}
         />
-        <AddComment label="Comment on this change" target={{ change: change.changeId }} />
+        <AddComment label="Comment on this change" target={{ change: change.changeId }} shortcut />
         {!review.canReview &&
           on("change").length + on("aside").length + unshownThreads.length === 0 && (
             <p className="empty">No comments.</p>

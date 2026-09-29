@@ -122,6 +122,7 @@ export function PlanPane({ view, base }: { view: RoundView; base: string }) {
             drafts={draftsOn(review.drafts, "plan")}
             target={{ plan: true }}
             addLabel="Comment on the whole plan"
+            shortcut
             preview={{ text: shown.body, breaks: false }}
           />
         ) : (

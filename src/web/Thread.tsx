@@ -54,7 +54,8 @@ export function ThreadCard({
 }) {
   const snippet = "snippet" in t.anchor ? t.anchor.snippet : [];
   return (
-    <article className={`thread thread-${t.status}`} id={`thread-${t.id}`}>
+    // Focusable, so `n`/`p` can select it and Tab goes on to its buttons.
+    <article className={`thread thread-${t.status}`} id={`thread-${t.id}`} tabIndex={-1}>
       <header className="thread-head">
         <a href={`#thread-${t.id}`} className="thread-id">
           #{t.id}
@@ -141,7 +142,7 @@ function ThreadReply({ thread: t }: { thread: ThreadView }) {
             Reply
           </button>
         ) : (
-          <button type="button" onClick={() => setOpen(true)}>
+          <button type="button" onClick={() => setOpen(true)} data-shortcut="reply">
             Reply…
           </button>
         )}

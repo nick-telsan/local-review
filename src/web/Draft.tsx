@@ -91,17 +91,25 @@ export function DraftList({ drafts }: { drafts: DraftComment[] }) {
 export function AddComment({
   label,
   target,
+  shortcut = false,
 }: {
   label: string;
   /** What it's on, in review-file form. */
   target: Omit<DraftCommentInput, "body" | "lines">;
+  /** The page's main comment, which `c` opens. */
+  shortcut?: boolean;
 }) {
   const review = useReview();
   const [open, setOpen] = useState(false);
   if (!review.canReview) return null;
   if (!open) {
     return (
-      <button type="button" className="add-comment" onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className="add-comment"
+        onClick={() => setOpen(true)}
+        data-shortcut={shortcut ? "comment" : undefined}
+      >
         + {label}
       </button>
     );

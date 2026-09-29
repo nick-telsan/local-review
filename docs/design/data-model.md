@@ -810,6 +810,13 @@ accepts it in the URL, since `EventSource` can't send headers. The server also r
 than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding), and non-GET requests from another
 `Origin`.
 
+**Keyboard.** On a round's pages (`?` lists them): `j`/`k` step through the sidebar (overview,
+plan, each change); `n`/`p` select the next or previous unresolved thread, going on to the next page
+with one; `r` replies to the selected thread; `]`/`[` move between the diff's files; `c` opens the
+page's main comment (the change, the plan, or the feature on the overview); `s` switches between
+the whole round and "since your last review"; `f` opens Finish review. They act on what's rendered,
+so they need no state of their own. Commenting on lines is still by mouse.
+
 **Live updates.** The CLI and agents write to the same SQLite database from other processes. While a
 page is connected, the server checks `PRAGMA data_version` every 500ms, and sends `changed` on a
 server-sent event stream when it moves. The page then refetches what it shows.

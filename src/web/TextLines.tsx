@@ -29,6 +29,7 @@ export function TextLines({
   addLabel,
   className,
   preview: rendered,
+  shortcut = false,
 }: {
   text: string;
   threads: ThreadView[];
@@ -42,6 +43,8 @@ export function TextLines({
    * with `breaks` when newlines are line breaks (a PR description, not a `.md` file).
    */
   preview?: { text: string; breaks: boolean };
+  /** Its whole-text comment is the page's main one, which `c` opens. */
+  shortcut?: boolean;
 }) {
   const review = useReview();
   const picker = useLinePicker<"text">();
@@ -108,7 +111,7 @@ export function TextLines({
             {items.map((item) => render(item, linesOf(item) !== null))}
           </div>
         )}
-        <AddComment label={addLabel} target={target} />
+        <AddComment label={addLabel} target={target} shortcut={shortcut} />
       </>
     );
   }
@@ -182,7 +185,7 @@ export function TextLines({
           {below.map((item) => render(item, linesOf(item) !== null))}
         </div>
       )}
-      <AddComment label={addLabel} target={target} />
+      <AddComment label={addLabel} target={target} shortcut={shortcut} />
     </>
   );
 }

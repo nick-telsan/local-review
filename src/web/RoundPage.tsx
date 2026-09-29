@@ -8,6 +8,7 @@ import { PlanPane, planPath } from "./PlanPane.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { draftsOn, makeReview, ReviewContext, useReview } from "./review.tsx";
 import { Link } from "./router.tsx";
+import { Shortcuts } from "./shortcuts.tsx";
 import { type Since, SinceBar, SinceProvider, useSinceFor } from "./since.tsx";
 import { TextLines } from "./TextLines.tsx";
 import { ThreadCard, ThreadList } from "./Thread.tsx";
@@ -160,6 +161,7 @@ function TopBar({ slug, view }: { slug: string; view: RoundView | null }) {
       <span className="spacer" />
       {view && <span className="muted">as {formatActor(view.actor)}</span>}
       {view && <ReviewPanel />}
+      {view && <Shortcuts />}
     </header>
   );
 }
@@ -397,7 +399,7 @@ function Overview({ view, base }: { view: RoundView; base: string }) {
         <ThreadList threads={general} />
         <DraftList drafts={draftsOn(review.drafts, "feature")} />
         {general.length === 0 && !review.canReview && <p className="empty">None.</p>}
-        <AddComment label="Add a general comment" target={{}} />
+        <AddComment label="Add a general comment" target={{}} shortcut />
       </section>
 
       {gone.length > 0 && (

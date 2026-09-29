@@ -52,7 +52,7 @@ lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads (--notes: the author's notes)
 lr diff                            # what changed since your last review, change by change
 lr status
-lr ui                              # review in your browser: comment, reply, submit a verdict
+lr ui                              # review in your browser: comment, reply, submit a verdict (? for keys)
                                    # (while it runs, review create/status/handoff link to the round)
 lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 
