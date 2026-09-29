@@ -8,6 +8,7 @@ import { LrError } from "../errors.ts";
 import type { ChangeSnapshot, CheckRun, Phase, Round, RoundStatus } from "../model.ts";
 import { type ReanchoredThread, reanchorThreads } from "../reanchor.ts";
 import { takeSnapshot } from "../snapshot.ts";
+import { roundPath, uiLink } from "../ui/running.ts";
 
 export type CheckResultJson = CheckRun & { cached: boolean };
 
@@ -24,6 +25,8 @@ export interface ReviewCreateOk {
   warnings: string[];
   /** Where the stack and the plan's tasks don't line up (see `planGaps`). */
   planGaps: PlanGap[];
+  /** The round's page in the review UI, when `lr ui` is running for this repo (no token). */
+  uiUrl: string | null;
 }
 
 /** `lr review create --json` output when checks or conflicts blocked the round. */
@@ -114,6 +117,7 @@ export async function reviewCreate(
     reanchored,
     warnings,
     planGaps: gaps,
+    uiUrl: uiLink(ctx.jj.root, roundPath(feature.slug, round.n)),
   };
   ctx.print(json, [
     `Round ${round.n} opened for ${feature.slug} (plan v${plan.version}, base ${snap.baseCommitId.slice(0, 8)})`,
@@ -130,6 +134,7 @@ export async function reviewCreate(
             "the task, add a `Plan-Task: <id>` trailer, or drop it in a revised plan.",
         ]
       : []),
+    ...(json.uiUrl ? [`Review it in the browser: ${json.uiUrl}`] : []),
   ]);
   return 0;
 }

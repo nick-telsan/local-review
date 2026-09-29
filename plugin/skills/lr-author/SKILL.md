@@ -97,7 +97,8 @@ the stack, runs the checks in `.local-review.toml`, and opens round N.
 - It also carries open threads from earlier rounds onto the new stack, and reports which moved or
   went outdated.
 
-Then stop and tell the developer the round is open, with a short summary of the stack. Don't review
+Then stop and tell the developer the round is open, with a short summary of the stack. If the
+output ends with a "Review it in the browser" link (the developer is running `lr ui`), pass it on. Don't review
 your own work. If the developer wants an agent review, it runs in a separate context (a subagent or
 another session) with the lr-review skill.
 

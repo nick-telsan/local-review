@@ -1,9 +1,8 @@
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, rmSync, writeFileSync } from "node:fs";
 import { processAlive } from "../checks.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
-import { repoDir } from "../paths.ts";
+import { readUiInfo, type UiInfo, uiInfoPath } from "../ui/running.ts";
 import { startUi } from "../ui/server.ts";
 
 /** `lr ui --json` output, printed once the UI is ready. */
@@ -12,13 +11,6 @@ export interface UiOk {
   url: string;
   /** Another `lr ui` for this repo was already serving it; this one just opened the link. */
   reused: boolean;
-}
-
-/** Where a running `lr ui` records itself, so a second one opens it instead of starting another. */
-interface UiInfo {
-  pid: number;
-  port: number;
-  token: string;
 }
 
 const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -45,7 +37,7 @@ export async function ui(
     throw new LrError(`--port must be a port number, not "${opts.port}"`);
   }
   const landing = landingPath(ctx);
-  const infoPath = join(repoDir(ctx.jj.root), "ui.json");
+  const infoPath = uiInfoPath(ctx.jj.root);
 
   const running = await runningUi(infoPath);
   if (running) {
@@ -81,7 +73,7 @@ export async function ui(
     for (const s of STOP_SIGNALS) process.on(s, stop);
   });
   await server.stop();
-  if (readInfo(infoPath)?.pid === process.pid) rmSync(infoPath, { force: true });
+  if (readUiInfo(infoPath)?.pid === process.pid) rmSync(infoPath, { force: true });
   return 0;
 }
 
@@ -99,18 +91,9 @@ function link(origin: string, path: string, token: string): string {
   return `${origin.replace(/\/$/, "")}${path}?t=${token}`;
 }
 
-function readInfo(path: string): UiInfo | null {
-  if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as UiInfo;
-  } catch {
-    return null;
-  }
-}
-
 /** The UI another lr is serving for this repo, if it's still up. */
 async function runningUi(path: string): Promise<UiInfo | null> {
-  const info = readInfo(path);
+  const info = readUiInfo(path);
   if (!info || !processAlive(info.pid)) return null;
   try {
     const res = await fetch(`http://127.0.0.1:${info.port}/api/ping`, {

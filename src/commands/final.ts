@@ -14,6 +14,7 @@ import {
 import type { Feature, FinalSnapshot, Phase, Round } from "../model.ts";
 import { reanchorThreads } from "../reanchor.ts";
 import { codeChanges, type Snapshot, takeSnapshot } from "../snapshot.ts";
+import { roundPath, uiLink } from "../ui/running.ts";
 import {
   type CheckResultJson,
   checkJson,
@@ -325,6 +326,7 @@ export async function finalRoundCreate(ctx: Context): Promise<number> {
     warnings,
     // The approved code is what's squashed, so its plan gaps were settled in code rounds.
     planGaps: [],
+    uiUrl: uiLink(ctx.jj.root, roundPath(slug, round.n)),
   };
   ctx.print(json, [
     `Final round ${round.n} opened for ${slug}: ${s.round.changes.length} changes from round ` +
@@ -337,6 +339,7 @@ export async function finalRoundCreate(ctx: Context): Promise<number> {
     `PR body: ${subject(final.prBody)}`,
     ...(reanchored.length ? [`Threads: ${describeReanchored(reanchored)}`] : []),
     ...warnings.map((w) => `warning: ${w}`),
+    ...(json.uiUrl ? [`Review it in the browser: ${json.uiUrl}`] : []),
   ]);
   return 0;
 }

@@ -9,6 +9,7 @@ import type {
   Round,
   Thread,
 } from "../model.ts";
+import { roundPath, uiLink } from "../ui/running.ts";
 import { loadHandoff } from "./handoff.ts";
 import { describeStack } from "./review.ts";
 
@@ -37,6 +38,8 @@ export interface StatusOk {
   threads: Thread[];
   /** Where the latest code round and its plan don't line up (see `planGaps`). */
   planGaps: PlanGap[];
+  /** The latest round's page in the review UI, when `lr ui` is running for this repo (no token). */
+  uiUrl: string | null;
   next: string;
 }
 
@@ -91,10 +94,22 @@ export async function status(ctx: Context): Promise<number> {
   if (byStatus.length) lines.push(`Threads: ${byStatus.join(", ")}`);
   const notes = threads.filter((t) => t.kind === "note").length;
   if (notes) lines.push(`Notes: ${notes} (\`lr threads --notes\`)`);
+  const uiUrl = round ? uiLink(ctx.jj.root, roundPath(feature.slug, round.n)) : null;
+  if (uiUrl) lines.push(`Review UI: ${uiUrl}`);
   const next = nextStep(ctx, feature, round);
   lines.push(`Next: ${next}`);
 
-  const ok: StatusOk = { feature, plan, round, checks, reviews, threads, planGaps: gaps, next };
+  const ok: StatusOk = {
+    feature,
+    plan,
+    round,
+    checks,
+    reviews,
+    threads,
+    planGaps: gaps,
+    uiUrl,
+    next,
+  };
   ctx.print(ok, lines);
   return 0;
 }

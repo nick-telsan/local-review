@@ -53,6 +53,7 @@ lr threads                         # unsettled threads (--notes: the author's no
 lr diff                            # what changed since your last review, change by change
 lr status
 lr ui                              # review in your browser: comment, reply, submit a verdict
+                                   # (while it runs, review create/status/handoff link to the round)
 lr rebase                          # onto the feature's base (--onto <revset> for a new base)
 
 # once you've approved with nothing open:

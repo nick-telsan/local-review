@@ -40,6 +40,8 @@ export interface Handoff {
   sections: HandoffSection[];
   /** Where a code round's changes and its plan's tasks don't line up (see `planGaps`). */
   planGaps: { gap: PlanGap; text: string }[];
+  /** The round's page in the review UI, when `lr ui` is running for this repo (no token). */
+  uiUrl: string | null;
   nextSteps: string[];
 }
 
@@ -56,6 +58,7 @@ export function buildHandoff(input: {
   reviews: Review[];
   checks: CheckRun[];
   threads: Thread[];
+  uiUrl?: string | null;
 }): HandoffResult {
   const { round, phases } = input;
   const reviews = input.reviews.filter((r) => r.state === "submitted");
@@ -99,6 +102,7 @@ export function buildHandoff(input: {
       threads,
       sections,
       planGaps: planGapsFound.map((gap) => ({ gap, text: describeGap(gap, round.changes) })),
+      uiUrl: input.uiUrl ?? null,
       nextSteps: nextSteps(
         round.kind,
         verdict,
@@ -265,8 +269,9 @@ export function renderHandoff(h: Handoff): string {
       : `**Checks:** ${h.checkCount ? `all ${h.checkCount} passing` : "none run"}  `,
   );
   out.push(
-    `**Plan:** v${h.planVersion} · ${h.threads.length} open thread(s)${blocking ? ` (${blocking} blocking)` : ""}`,
+    `**Plan:** v${h.planVersion} · ${h.threads.length} open thread(s)${blocking ? ` (${blocking} blocking)` : ""}${h.uiUrl ? "  " : ""}`,
   );
+  if (h.uiUrl) out.push(`**Review UI:** ${h.uiUrl}`);
 
   for (const r of h.reviews.filter((r) => r.body)) {
     out.push("", `## Reviewer summary (${formatActor(r.reviewer)})`, "", quote(r.body!));

@@ -787,6 +787,10 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
 `lr ui` serves a React app and a JSON API on 127.0.0.1 and opens the browser (`$BROWSER`, else the
 platform's opener) at the current feature's latest round. It runs until Ctrl-C. One per repo: it records its pid, port, and token in
 `<repo-key>/ui.json` (mode 0600), and a second `lr ui` opens that one instead of starting another.
+While one runs, other commands link to the round they're about: `lr review create` (code and final),
+`lr status`, `lr handoff`, and the session-start hook print its page's address, and their JSON has
+it as `uiUrl` (null when no UI is running). These links leave out the token, since CLI output lands
+in transcripts and handoffs; the browser `lr ui` opened already holds it.
 The standalone binary embeds the page; from source, Bun bundles `src/web/index.html` at startup.
 
 It acts as a person: `--as` or `$LR_ACTOR` if either names a human, else the OS user, never the

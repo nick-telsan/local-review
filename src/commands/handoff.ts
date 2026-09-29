@@ -2,6 +2,7 @@ import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
 import { buildHandoff, type HandoffResult, renderHandoff } from "../handoff.ts";
 import type { Feature, Round } from "../model.ts";
+import { roundPath, uiLink } from "../ui/running.ts";
 
 /** Everything the author needs after a review round, as markdown (or --json). Read-only. */
 export async function handoff(ctx: Context, opts: { round?: string }): Promise<number> {
@@ -27,5 +28,6 @@ export function loadHandoff(ctx: Context, feature: Feature, round: Round): Hando
     reviews: ctx.store.listReviews(feature.slug, round.n),
     checks: ctx.store.roundChecks(feature.slug, round.n),
     threads: ctx.store.listThreads(feature.slug),
+    uiUrl: uiLink(ctx.jj.root, roundPath(feature.slug, round.n)),
   });
 }

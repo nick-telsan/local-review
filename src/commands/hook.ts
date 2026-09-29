@@ -6,6 +6,7 @@ import { Jj } from "../jj.ts";
 import type { Feature } from "../model.ts";
 import { repoDir } from "../paths.ts";
 import { takeSnapshot } from "../snapshot.ts";
+import { roundPath, uiLink } from "../ui/running.ts";
 import { nextStep } from "./status.ts";
 
 export const HOOK_EVENTS = ["session-start", "pre-tool-use", "stop"] as const;
@@ -105,11 +106,15 @@ async function sessionStart(ctx: Context, input: HookInput): Promise<number> {
   const counts = Object.entries(Object.groupBy(threads, (t) => t.status)).map(
     ([s, ts]) => `${ts!.length} ${s}`,
   );
+  const ui = round && uiLink(ctx.jj.root, roundPath(feature.slug, round.n));
   ctx.io.out(
     [
       `local-review (lr) is tracking feature "${feature.slug}" in this repo: ${feature.status}, ` +
         `${plan}${round ? `, round ${round.n} (${round.status})` : ""}.`,
       ...(counts.length ? [`Threads: ${counts.join(", ")}.`] : []),
+      ...(ui
+        ? [`The developer's review UI (\`lr ui\`) is running; round ${round!.n} is at ${ui}`]
+        : []),
       `Next: ${nextStep(ctx, feature, round)}.`,
       SKILLS,
     ].join("\n"),
