@@ -1,5 +1,6 @@
 import { chmodSync, rmSync, writeFileSync } from "node:fs";
 import { processAlive } from "../checks.ts";
+import { CONFIG_FILE, isPort, loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
 import { readUiInfo, type UiInfo, uiInfoPath } from "../ui/running.ts";
@@ -32,8 +33,8 @@ export async function ui(
         "(if lr runs through a shim, check which bun it resolves outside this repo)",
     );
   }
-  const port = opts.port === undefined ? undefined : Number(opts.port);
-  if (port !== undefined && !(Number.isInteger(port) && port > 0 && port < 65536)) {
+  const flag = opts.port === undefined ? undefined : Number(opts.port);
+  if (flag !== undefined && !isPort(flag)) {
     throw new LrError(`--port must be a port number, not "${opts.port}"`);
   }
   const landing = landingPath(ctx);
@@ -47,14 +48,28 @@ export async function ui(
     return 0;
   }
 
+  // A stable port keeps links and open tabs working across restarts of `lr ui`.
+  const configured = (await loadRepoConfig(ctx.jj.root)).ui.port;
+  const port = flag ?? configured ?? defaultPort(ctx.jj.root);
   let server: ReturnType<typeof startUi>;
   try {
     server = startUi(ctx, { port, dev: opts.dev });
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") {
+    if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
+    if (flag !== undefined) {
       throw new LrError(`port ${port} is in use; pick another with --port, or leave it out`);
     }
-    throw e;
+    if (configured !== null) {
+      throw new LrError(
+        `port ${port} ([ui] port in ${CONFIG_FILE}) is in use; change it, or pass --port`,
+      );
+    }
+    // Something else took this repo's default; any free port beats not starting.
+    server = startUi(ctx, { port: 0, dev: opts.dev });
+    ctx.io.err(
+      `Port ${port}, this repo's default, is in use, so this is on ${server.port}. ` +
+        `Set [ui] port in ${CONFIG_FILE} to pick one that's free.`,
+    );
   }
   const info: UiInfo = { pid: process.pid, port: server.port, token: server.token };
   writeFileSync(infoPath, JSON.stringify(info));
@@ -75,6 +90,15 @@ export async function ui(
   await server.stop();
   if (readUiInfo(infoPath)?.pid === process.pid) rmSync(infoPath, { force: true });
   return 0;
+}
+
+/**
+ * This checkout's port when nothing sets one: the same every time, and spread over 47000-47999
+ * so that UIs for different repos rarely clash.
+ */
+export function defaultPort(root: string): number {
+  const hash = new Bun.CryptoHasher("sha256").update(root).digest("hex");
+  return 47000 + (Number.parseInt(hash.slice(0, 8), 16) % 1000);
 }
 
 /** The current feature's latest round, or the feature list when there's no one feature. */

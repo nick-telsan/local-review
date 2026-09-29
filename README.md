@@ -154,6 +154,15 @@ To require a human to accept agent reviewers' comments before they reach the aut
 triage_agent_comments = true
 ```
 
+`lr ui` serves each repo on its own port, the same every time (47000–47999, from the repo's path),
+so the links other commands print keep working after a restart. To pick the port yourself (`--port`
+still overrides it):
+
+```toml
+[ui]
+port = 4747
+```
+
 State lives in `~/.local-review/` (override with `$LOCAL_REVIEW_HOME`).
 
 ## Claude Code

@@ -676,6 +676,62 @@ describe("lr ui", () => {
     expect(taken.err).toContain(`port ${port} is in use`);
   });
 
+  /** A port nothing is listening on. */
+  function freePort(): number {
+    const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
+    const port = probe.port!;
+    probe.stop(true);
+    return port;
+  }
+
+  async function servedPort(...args: string[]): Promise<{ port: number; err: string[] }> {
+    const run = await runUi("--json", ...args);
+    await waitFor(() => run.out.length > 0);
+    const port = Number(new URL((JSON.parse(run.out[0]!) as UiOk).url).port);
+    process.emit("SIGINT", "SIGINT");
+    expect(await run.done).toBe(0);
+    return { port, err: run.err };
+  }
+
+  test("serves on the repo's own port, or the one in .local-review.toml", async () => {
+    const { defaultPort } = await import("../src/commands/ui.ts");
+    const fallback = defaultPort(repo.root);
+    expect(fallback).toBeGreaterThanOrEqual(47000);
+    expect(fallback).toBeLessThan(48000);
+    expect((await servedPort()).port).toBe(fallback);
+
+    const configured = freePort();
+    await repo.write(".local-review.toml", `[ui]\nport = ${configured}\n`);
+    expect((await servedPort()).port).toBe(configured);
+    const flag = freePort();
+    expect((await servedPort("--port", String(flag))).port).toBe(flag);
+  });
+
+  test("falls back to any port when something else has the default", async () => {
+    const { defaultPort } = await import("../src/commands/ui.ts");
+    const port = defaultPort(repo.root);
+    const other = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("") });
+    try {
+      const served = await servedPort();
+      expect(served.port).not.toBe(port);
+      expect(served.err.join("\n")).toContain(
+        `Port ${port}, this repo's default, is in use, so this is on ${served.port}.`,
+      );
+    } finally {
+      await other.stop();
+    }
+  });
+
+  test("refuses when the configured port is taken", async () => {
+    const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
+    const port = other.port!;
+    await repo.write(".local-review.toml", `[ui]\nport = ${port}\n`);
+    const r = await lr(repo, "ui", "--no-open");
+    await other.stop();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`port ${port} ([ui] port in .local-review.toml) is in use`);
+  });
+
   test("lands on the feature list when there's no one active feature", async () => {
     await lr(repo, "feature", "start", "other", "--base", "main");
     const run = await runUi("--json");

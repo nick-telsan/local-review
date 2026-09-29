@@ -23,6 +23,7 @@ describe("loadRepoConfig", () => {
       checks: [],
       review: { triageAgentComments: false },
       final: { commitGuidelines: null, prTemplate: null },
+      ui: { port: null },
     });
   });
 
@@ -57,6 +58,7 @@ run = "bun run lint"
       ],
       review: { triageAgentComments: false },
       final: { commitGuidelines: null, prTemplate: null },
+      ui: { port: null },
     });
   });
 
@@ -94,6 +96,16 @@ run = "x"
     expect(message).toContain("checks[3].timeout");
     expect(message).toContain("checks[3].kill_after");
     expect(message).toContain('checks[4].name: duplicate check "c"');
+  });
+
+  test("ui settings", async () => {
+    expect((await load("[ui]\nport = 4747\n")).ui).toEqual({ port: 4747 });
+    for (const bad of ['port = "http"', "port = 70000", "port = 0", "port = 47.5"]) {
+      await expect(load(`[ui]\n${bad}\n`)).rejects.toThrow(
+        "ui.port: must be a port number (1-65535)",
+      );
+    }
+    await expect(load('ui = "x"\n')).rejects.toThrow("ui: must be a table ([ui])");
   });
 
   test("review settings", async () => {

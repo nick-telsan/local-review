@@ -785,7 +785,10 @@ Session records live in `<repo-key>/sessions/<session id>.json`.
 ### Web UI
 
 `lr ui` serves a React app and a JSON API on 127.0.0.1 and opens the browser (`$BROWSER`, else the
-platform's opener) at the current feature's latest round. It runs until Ctrl-C. One per repo: it records its pid, port, and token in
+platform's opener) at the current feature's latest round. The port is `--port`, else `[ui] port` in
+`.local-review.toml`, else one derived from the repo's path (47000–47999), so it's the same after a
+restart and links and open tabs keep working. If something else holds that derived port, `lr ui`
+takes any free one and says so; a port set with `--port` or the config must be free. It runs until Ctrl-C. One per repo: it records its pid, port, and token in
 `<repo-key>/ui.json` (mode 0600), and a second `lr ui` opens that one instead of starting another.
 While one runs, other commands link to the round they're about: `lr review create` (code and final),
 `lr status`, `lr handoff`, and the session-start hook print its page's address, and their JSON has
@@ -800,7 +803,9 @@ reviews via `lr review submit`'s path, and replies go through `lr reply`'s rules
 **Security.** The API reads and writes reviews, so any page open in the browser must
 not reach it. The page itself is public, since it's the same bundle for everyone. The API needs a
 random token, sent as `Authorization: Bearer`. The link `lr ui` prints carries it as `?t=`; the page
-keeps it in `localStorage` (per port) and takes it out of the address bar. Only the event stream
+keeps it in `localStorage` (per port) and takes it out of the address bar. A restarted `lr ui` has a
+new token; the tab it opens stores it, and pages still open from before pick it up (the `storage`
+event), reconnect, and refetch. Only the event stream
 accepts it in the URL, since `EventSource` can't send headers. The server also refuses a `Host` other
 than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding), and non-GET requests from another
 `Origin`.

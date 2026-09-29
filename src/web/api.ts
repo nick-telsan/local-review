@@ -69,20 +69,32 @@ let source: EventSource | null = null;
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  if (!source) {
-    source = new EventSource(`/api/events?t=${encodeURIComponent(getToken() ?? "")}`);
-    source.onmessage = () => {
-      for (const l of listeners) l();
-    };
-    // After a reconnect, whatever changed while disconnected is unknown: refetch.
-    source.onopen = () => {
-      for (const l of listeners) l();
-    };
-  }
+  if (!source) connect();
   return () => {
     listeners.delete(listener);
   };
 }
+
+function connect(): void {
+  source?.close();
+  source = new EventSource(`/api/events?t=${encodeURIComponent(getToken() ?? "")}`);
+  source.onmessage = () => {
+    for (const l of listeners) l();
+  };
+  // After a reconnect, whatever changed while disconnected is unknown: refetch.
+  source.onopen = () => {
+    for (const l of listeners) l();
+  };
+}
+
+// A restarted `lr ui` serves on the same port with a new token, which this page's requests (and
+// its event stream, which then gives up) are refused without. The tab it opens stores the new
+// token, and the browser tells the other tabs: take it, reconnect, and refetch.
+window.addEventListener("storage", (e: StorageEvent) => {
+  if (e.key !== KEY || !e.newValue || e.newValue === token) return;
+  token = e.newValue;
+  if (source) connect();
+});
 
 export interface Loaded<T> {
   data: T | null;

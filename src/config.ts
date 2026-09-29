@@ -24,6 +24,11 @@ export interface FinalConfig {
   prTemplate: string | null;
 }
 
+export interface UiConfig {
+  /** The port `lr ui` serves on; null for the default, which is derived from the repo's path. */
+  port: number | null;
+}
+
 export interface RepoConfig {
   /** Runs in the check workspace before checks at each commit (e.g. `bun install`). */
   setup: string | null;
@@ -31,6 +36,7 @@ export interface RepoConfig {
   checks: CheckConfig[];
   review: ReviewConfig;
   final: FinalConfig;
+  ui: UiConfig;
 }
 
 const DEFAULT_REVIEW: ReviewConfig = { triageAgentComments: false };
@@ -54,6 +60,7 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
       checks: [],
       review: DEFAULT_REVIEW,
       final,
+      ui: { port: null },
     };
   }
 
@@ -139,10 +146,27 @@ export async function loadRepoConfig(root: string): Promise<RepoConfig> {
     }
   }
 
+  const ui: UiConfig = { port: null };
+  const rawUi = data.ui ?? {};
+  if (typeof rawUi !== "object" || rawUi === null || Array.isArray(rawUi)) {
+    problems.push("ui: must be a table ([ui])");
+  } else {
+    const port = (rawUi as Record<string, unknown>).port;
+    if (port !== undefined && !isPort(port)) {
+      problems.push("ui.port: must be a port number (1-65535)");
+    } else if (port !== undefined) {
+      ui.port = port as number;
+    }
+  }
+
   if (problems.length > 0) {
     throw new LrError(`${CONFIG_FILE}:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
   }
-  return { setup: setup as string | null, setupKillAfterMs, checks, review, final };
+  return { setup: setup as string | null, setupKillAfterMs, checks, review, final, ui };
+}
+
+export function isPort(value: unknown): boolean {
+  return Number.isInteger(value) && (value as number) > 0 && (value as number) < 65536;
 }
 
 export function parseDuration(text: string): number | null {
