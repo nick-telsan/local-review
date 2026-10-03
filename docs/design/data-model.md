@@ -103,6 +103,13 @@ interface Feature {
 }
 ```
 
+`lr feature start` resolves the base once, to catch a base that would sweep in commits that aren't
+the feature's: one below bookmarks that `@` builds on. That's the usual mistake, since jj's default
+`trunk()` finds only a remote's `main`, `master` or `trunk`, and in a repo with no remote it's the
+root commit. With the default base it's an error that names the nearest such bookmark to pass as
+`--base`. A base given by name (even `--base 'trunk()'`) is taken as meant, with a warning. A
+default base that's the root commit with no bookmarks in the way (a new repo) only warns.
+
 ### Plan
 
 The plan is markdown with YAML frontmatter. The frontmatter holds the parts the tool needs to
@@ -260,8 +267,11 @@ commits that changed get re-checked.
 
 Every check runs in the feature's jj workspace (`workspaces/checks`), including checks at the tip,
 so the developer's working copy is never touched. Before each commit the workspace is restored,
-which discards anything a previous check wrote. That keeps the workspace commit empty, and jj
-abandons it when the workspace moves on. Checks get `LR_CHECK`, `LR_CHANGE_ID` and `LR_COMMIT_ID`
+which discards anything a previous check wrote. That keeps the workspace commit empty. It's one
+change for the workspace's life, described as lr's (`lr: where local-review runs checks for …`)
+and moved with `jj rebase -r @`, so in `jj log` it doesn't read as a stray change of the
+developer's. jj abandons an empty working-copy commit on `workspace forget` only when it has no
+description, so lr abandons it first. Checks get `LR_CHECK`, `LR_CHANGE_ID` and `LR_COMMIT_ID`
 in their environment.
 
 If a check fails, or a change is conflicted (conflicts propagate to descendants), no round is
@@ -397,6 +407,9 @@ lr note <change> "<text>"                             # on the change
 lr note <change> <path>:<line>[-<line>] [--old] "<text>"   # on lines of the diff it introduces
 ```
 
+- `<change>` is a change id or prefix, or a revset that resolves to one change in the stack (`@-`,
+  a bookmark). `lr check <change>` on the live stack takes the same. A round's changes are named
+  by change id only, since a revset would resolve against the repo now, not the round.
 - A note is written against the stack as it is now, not a round's snapshot, since it's usually
   written while a phase is still in progress. Before any phase bookmark exists, the stack runs from
   the base up to `@`. The location is checked like a review comment's. The note records the stack's
@@ -705,7 +718,8 @@ These are the only write paths into the model, so it's worth listing them now:
 
 | Command                                                                  | Who            | Effect                                                                        |
 | ------------------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------- |
-| `lr feature start <slug> [--base <revset>]`                              | author agent   | create feature                                                                |
+| `lr init`                                                                | developer      | write a commented `.local-review.toml`                                        |
+| `lr feature start <slug> [--base <revset>]`                              | author agent   | create feature (see Feature for the base checks)                              |
 | `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
 | `lr note <change> [<path>:<a>[-<b>] [--old]] "<text>"`                   | author agent   | a note for reviewers on your own change (see Notes)                           |
 | `lr review create [--allow-failing] [--skip-checks]`                     | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |

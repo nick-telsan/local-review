@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
+import type { FeatureStartOk } from "../src/commands/feature.ts";
 import type { PlanVersion } from "../src/model.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
 import { lr, lrJson, lrWithStdin } from "./lr.ts";
@@ -68,7 +69,7 @@ describe("lr feature", () => {
     expect((await lr(repo, "feature", "list")).out).toBe("No features yet.");
     const started = await lr(repo, "feature", "start", "auth", "--title", "Auth", "--base", "main");
     expect(started.code).toBe(0);
-    expect(started.out).toContain("Started feature auth (base: main)");
+    expect(started.out).toContain("Started feature auth (base: main, now ");
     const list = await lr(repo, "feature", "list");
     expect(list.out).toMatch(/^auth\s+planning\s+plan v-\s+Auth$/);
   });
@@ -83,6 +84,79 @@ describe("lr feature", () => {
     const bad = await lr(repo, "feature", "start", "other", "--base", "no-such-bookmark");
     expect(bad.code).toBe(1);
     expect(bad.err).toContain("jj log");
+  });
+});
+
+describe("lr feature start's base", () => {
+  const start = (...args: string[]) => lrJson<FeatureStartOk>(repo, "feature", "start", ...args);
+
+  test("says what it resolved to", async () => {
+    const r = await lr(repo, "feature", "start", "auth", "--base", "main");
+    const main = (await repo.jj("log", "--no-graph", "-r", "main", "-T", "change_id")).trim();
+    expect(r.out).toStartWith(
+      `Started feature auth (base: main, now ${main.slice(0, 8)} "base")\n`,
+    );
+  });
+
+  test("refuses a default base below a bookmark @ builds on", async () => {
+    const r = await lr(repo, "feature", "start", "auth");
+    expect(r.code).toBe(1);
+    expect(r.err).toBe(
+      "error: @ builds on bookmark main, above the base (trunk(), the root commit): the feature " +
+        "would include its commits.\n" +
+        "Start it from there: lr feature start <slug> --base main\n" +
+        "(trunk() looks for main, master, or trunk on a remote, and found none. To point it at " +
+        `main in this repo: jj config set --repo 'revset-aliases."trunk()"' main)\n` +
+        "To start from trunk() anyway, pass --base 'trunk()'.",
+    );
+    expect((await lr(repo, "feature", "list")).out).toBe("No features yet.");
+  });
+
+  test("names the nearest bookmarks, quoting odd names", async () => {
+    await repo.commit("Stacked", { "a.ts": "a\n" });
+    await repo.bookmark("feat/one");
+    await repo.bookmark('"a stack"');
+    await repo.jj("config", "set", "--repo", 'revset-aliases."trunk()"', "main");
+    const r = await lr(repo, "feature", "start", "two");
+    expect(r.err).toContain(
+      "@ builds on bookmarks a stack, feat/one, above the base (trunk()): the feature would " +
+        "include their commits.\n" +
+        `Start it from there: lr feature start <slug> --base '"a stack"'\n` +
+        "To start from trunk() anyway",
+    );
+    expect(r.err).not.toContain("jj config set");
+  });
+
+  test("warns, but starts, when the base was given", async () => {
+    const r = await start("auth", "--base", "trunk()");
+    expect(r.code).toBe(0);
+    expect(r.data.base.root).toBe(true);
+    expect(r.data.warnings).toEqual([
+      "@ builds on bookmark main, above the base (trunk(), the root commit): the feature would " +
+        "include its commits",
+    ]);
+    expect((await lr(repo, "feature", "start", "x", "--base", "root()")).out).toContain(
+      "Started feature x (base: root(), the root commit)\nwarning: @ builds on bookmark main, " +
+        "above the base (root(), the root commit)",
+    );
+  });
+
+  test("a new repo starts from the root, with a warning", async () => {
+    const fresh = await repo.sibling("fresh");
+    const r = await lrJson<FeatureStartOk>(fresh, "feature", "start", "first");
+    expect(r.code).toBe(0);
+    expect(r.data.warnings).toEqual([
+      "trunk() is the root commit, so this feature covers the repo's whole history. That's right " +
+        "for a new repo; otherwise start it from a bookmark with --base.",
+    ]);
+  });
+
+  test("a trunk() that finds the bookmark needs no --base", async () => {
+    await repo.jj("config", "set", "--repo", 'revset-aliases."trunk()"', "main");
+    const r = await start("auth");
+    expect(r.code).toBe(0);
+    expect(r.data.warnings).toEqual([]);
+    expect(r.data.base.root).toBe(false);
   });
 });
 

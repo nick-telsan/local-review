@@ -38,10 +38,12 @@ The shim runs whichever `bun` resolves where you run `lr`, which with asdf may n
 outside this repo. `lr ui` needs Bun 1.4.2 or later, and says so if it gets an older one.
 
 ```sh
-lr feature start auth-refresh --base 'trunk()'
+lr init                            # optional: a commented .local-review.toml to fill in
+lr feature start auth-refresh      # base: trunk(), or --base <revset>
 lr plan submit -F plan.md          # markdown with a `phases:` frontmatter block
 # … implement: one commit per task, `jj bookmark set <phase bookmark>` when a phase is done …
 lr note kxqp src/db.ts:40-41 "Temporary until phase 3"   # for reviewers, not in the code
+lr note @- "Split out for phase 2"                         # a revset works too
 lr check                           # run the checks now, without opening a round
 lr review create                   # snapshot + checks; exits 1 if a check fails
 lr review submit -F review.json --as agent:codex        # a reviewer agent's review
@@ -65,6 +67,12 @@ lr final apply                     # squash the stack exactly as approved (undo:
 lr feature clean                   # once it lands: forget finished features' bookmarks
 lr repo relink                     # after moving the repo: bring its review history along
 ```
+
+A feature's base defaults to jj's `trunk()`, which finds `main`, `master` or `trunk` on a remote.
+In a repo with no remote, that's the root commit, so name the base (`--base main`), or point
+`trunk()` at your bookmark: `jj config set --repo 'revset-aliases."trunk()"' main`. If the base
+would sweep in bookmarks that `@` builds on, `lr feature start` refuses a default base and warns
+about one you named.
 
 Every command takes `--json`. Actors are `--as human:<name>` or `--as agent:<name>` (or
 `$LR_ACTOR`). Inside a coding agent such as Claude Code, lr defaults to that agent, so an agent
@@ -117,7 +125,8 @@ rejected as a whole, with every problem listed. The full format is in
 
 ### Checks
 
-Define checks in `.local-review.toml` at the repo root:
+Define checks in `.local-review.toml` at the repo root (`lr init` writes one with every setting
+commented out):
 
 ```toml
 setup = "bun install --frozen-lockfile"   # optional, runs once per checked commit
@@ -132,7 +141,9 @@ kill_after = "30s"    # after a timeout, how long it gets to shut down before SI
 ```
 
 Checks run in a separate jj workspace, so your working copy is never touched. A passing result
-is reused as long as the commit and the command haven't changed.
+is reused as long as the commit and the command haven't changed. In `jj log`, the workspace's commit
+is the empty one marked `lr-<feature>-checks@` and described as local-review's. It isn't part of
+your stack, and `lr feature clean` removes it.
 
 Rebasing (with `lr rebase` or plain `jj rebase`) doesn't disturb a review. An approval survives a
 clean rebase, because lr compares each change's own diff (`jj interdiff`), not commit ids. The checks

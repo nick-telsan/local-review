@@ -3,11 +3,20 @@ import { join } from "node:path";
 import { checkWorkspaceDir, checkWorkspaceName } from "../checks.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
-import { revsetString } from "../jj.ts";
+import { type Jj, revsetString } from "../jj.ts";
 import type { Feature } from "../model.ts";
 import { movedHint } from "../paths.ts";
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+/** `lr feature start --json` output. */
+export interface FeatureStartOk {
+  feature: Feature;
+  dir: string;
+  /** What the base resolved to now; a round resolves it again. */
+  base: { commitId: string; changeId: string; root: boolean };
+  warnings: string[];
+}
 
 export async function featureStart(
   ctx: Context,
@@ -21,16 +30,79 @@ export async function featureStart(
     );
   }
   const baseRevset = opts.base ?? "trunk()";
+  const jj = ctx.jj.at(await ctx.jj.snapshotOp());
   // Fail early on a revset that doesn't resolve.
-  await ctx.jj.run(["log", "--no-graph", "--limit", "1", "-r", baseRevset, "-T", "commit_id"]);
+  await jj.run(["log", "--no-graph", "--limit", "1", "-r", baseRevset, "-T", "commit_id"]);
+  const [base] = await jj.commits(`latest(${baseRevset})`);
+  const warnings = await baseWarnings(jj, baseRevset, opts.base === undefined);
 
   const feature = ctx.store.createFeature({ slug, title: opts.title ?? slug, baseRevset });
-  ctx.print({ feature, dir: ctx.featureDir(slug) }, [
-    `Started feature ${slug} (base: ${baseRevset})`,
+  const root = base!.commitId === ROOT_COMMIT;
+  const json: FeatureStartOk = {
+    feature,
+    dir: ctx.featureDir(slug),
+    base: { commitId: base!.commitId, changeId: base!.changeId, root },
+    warnings,
+  };
+  const at = root
+    ? "the root commit"
+    : `now ${base!.changeId.slice(0, 8)}${base!.description ? ` "${firstLine(base!.description)}"` : ""}`;
+  ctx.print(json, [
+    `Started feature ${slug} (base: ${baseRevset}, ${at})`,
+    ...warnings.map((w) => `warning: ${w}`),
     `State: ${ctx.featureDir(slug)}`,
     `Next: write a plan and run \`lr plan submit -F <file>\``,
   ]);
   return 0;
+}
+
+const ROOT_COMMIT = "0".repeat(40);
+
+const firstLine = (text: string) => text.split("\n")[0]!;
+
+/**
+ * Catch a base that would sweep commits into the feature that aren't its own: one below
+ * bookmarks that @ builds on (`trunk()` finds only a remote's main bookmark, so in a repo with no
+ * remote it's the root commit). With the default base, that's an error; a base given by name is
+ * taken as meant, with a warning.
+ */
+async function baseWarnings(jj: Jj, baseRevset: string, defaulted: boolean): Promise<string[]> {
+  const base = `(${baseRevset})`;
+  const ahead = await jj.commits(`heads((${base}::@ ~ ${base}) & bookmarks())`);
+  const isRoot = (await jj.commits(`${base} & root()`)).length > 0;
+  const named = ahead.flatMap((c) => c.bookmarks);
+  if (named.length === 0) {
+    return isRoot && defaulted
+      ? [
+          "trunk() is the root commit, so this feature covers the repo's whole history. That's " +
+            "right for a new repo; otherwise start it from a bookmark with --base.",
+        ]
+      : [];
+  }
+
+  const many = named.length > 1;
+  const problem =
+    `@ builds on ${many ? "bookmarks" : "bookmark"} ${named.join(", ")}, above the base ` +
+    `(${baseRevset}${isRoot ? ", the root commit" : ""}): the feature would include ` +
+    `${many ? "their" : "its"} commits`;
+  if (!defaulted) return [problem];
+  const lines = [
+    `${problem}.`,
+    `Start it from there: lr feature start <slug> --base ${revsetArg(named[0]!)}`,
+  ];
+  if (isRoot) {
+    lines.push(
+      "(trunk() looks for main, master, or trunk on a remote, and found none. To point it at " +
+        `${named[0]} in this repo: jj config set --repo 'revset-aliases."trunk()"' ${revsetArg(named[0]!)})`,
+    );
+  }
+  lines.push("To start from trunk() anyway, pass --base 'trunk()'.");
+  throw new LrError(lines.join("\n"));
+}
+
+/** A bookmark name as it'd be typed in a shell command line. */
+function revsetArg(name: string): string {
+  return /^[\w./-]+$/.test(name) ? name : `'${revsetString(name)}'`;
 }
 
 export async function featureList(ctx: Context): Promise<number> {

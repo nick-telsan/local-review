@@ -83,7 +83,7 @@ describe("lr check", () => {
       `schema@${at(c1)}:pass`,
       `flaky@${at(c1)}:pass`,
     ]);
-    expect(runs((await check(c1, c2, c1, "--check", "ok, schema")).data)).toEqual([
+    expect(runs((await check(c1, "@-", c1, "--check", "ok, schema")).data)).toEqual([
       `ok@${at(c1)}:pass`,
       `schema@${at(c1)}:pass`,
       `ok@${at(c2)}:pass`,
@@ -132,7 +132,7 @@ describe("lr check", () => {
     expect(await err("--check", "ok,nope")).toContain(
       "no check named nope (checks: ok, schema, flaky)",
     );
-    expect(await err("zzzz")).toContain(`change "zzzz" isn't in the stack`);
+    expect(await err("nope(")).toContain(`change "nope(" isn't in the stack`);
     expect(await err("--round", "1")).toContain("no review round yet");
     await repo.jj("bookmark", "forget", "feat/1-schema", "feat/2-rotation");
     await repo.jj("new", c1);

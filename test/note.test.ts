@@ -90,7 +90,19 @@ describe("lr note", () => {
     expect(await err(c1, "db.ts:3-2", "why")).toContain("lines must be 1-based, first ≤ last");
     expect(await err(c1, "db.ts:9", "why")).toContain("lines 9-9 are past the end of db.ts");
     expect(await err(c1, "use.ts:1", "why")).toContain("use.ts doesn't exist on the new side");
-    expect(await err("zzzz", "why")).toContain(`change "zzzz" isn't in the stack`);
+    expect(await err("nope(", "why")).toContain(`change "nope(" isn't in the stack (changes: `);
+    expect(await err("zzzz", "why")).toContain(
+      "zzzz is zzzzzzzz (the root commit), which isn't in the stack",
+    );
+    expect(await err("all()", "why")).toContain(`"all()" is 5 commits; name one change`);
+  });
+
+  test("takes a revset for the change", async () => {
+    expect((await note("@-", "On the parent")).anchor).toEqual({ kind: "change", changeId: c2 });
+    expect((await note("@--", "db.ts:1", "Line one")).anchor).toMatchObject({ changeId: c1 });
+    expect((await lr(repo, "note", "@", "why")).err).toContain(
+      "(the working copy; its parent is @-), which isn't in the stack",
+    );
   });
 
   test("needs something in the stack", async () => {

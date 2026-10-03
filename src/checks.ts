@@ -416,34 +416,50 @@ class CheckWorkspace {
   private constructor(
     readonly dir: string,
     private readonly ws: Jj,
+    private readonly description: string,
   ) {}
 
   static async open(repo: Jj, slug: string, dir: string): Promise<CheckWorkspace> {
     const name = checkWorkspaceName(slug);
+    const description = checkWorkspaceDescription(slug);
     if (!existsSync(join(dir, ".jj"))) {
       // Created at the root commit; `checkout` moves it where it's needed.
       mkdirSync(join(dir, ".."), { recursive: true });
+      const add = ["workspace", "add", "--name", name, "-r", "root()", "-m", description, dir];
       try {
-        await repo.run(["workspace", "add", "--name", name, "-r", "root()", dir]);
+        await repo.run(add);
       } catch (e) {
         // The directory was deleted but jj still remembers the workspace.
         if (!(e instanceof LrError) || !e.message.includes("already exists")) throw e;
-        await repo.run(["workspace", "forget", name]);
-        await repo.run(["workspace", "add", "--name", name, "-r", "root()", dir]);
+        await repo.forgetWorkspace(name);
+        await repo.run(add);
       }
     }
-    return new CheckWorkspace(dir, new Jj(dir));
+    return new CheckWorkspace(dir, new Jj(dir), description);
   }
 
+  /**
+   * Move the workspace's commit onto `commitId`. It's one change for the workspace's life, empty
+   * and described, so in `jj log` it reads as lr's rather than a stray change of the developer's.
+   */
   async checkout(commitId: string): Promise<void> {
     // The main workspace may have rewritten commits since we last ran.
     await this.ws.run(["workspace", "update-stale"]);
     await this.clean();
-    await this.ws.run(["new", commitId]);
+    await this.ws.run(["rebase", "-r", "@", "-o", commitId]);
+    // Workspaces made before they had a description.
+    if ((await this.ws.single("@")).description.trim() !== this.description) {
+      await this.ws.run(["describe", "-m", this.description]);
+    }
   }
 
-  /** Discard anything a check wrote, so the workspace commit stays empty and jj abandons it. */
+  /** Discard anything a check wrote, so the workspace commit stays empty. */
   async clean(): Promise<void> {
     await this.ws.run(["restore"]);
   }
+}
+
+/** The description of a feature's checks workspace commit, as `jj log` shows it. */
+export function checkWorkspaceDescription(slug: string): string {
+  return `lr: where local-review runs checks for ${slug} (not part of the stack)`;
 }

@@ -13,6 +13,7 @@ import {
 } from "./commands/final.ts";
 import { handoff } from "./commands/handoff.ts";
 import { HOOK_EVENTS, hook } from "./commands/hook.ts";
+import { init } from "./commands/init.ts";
 import { note } from "./commands/note.ts";
 import { planShow, planSubmit } from "./commands/plan.ts";
 import { rebase } from "./commands/rebase.ts";
@@ -28,7 +29,9 @@ import { LrError } from "./errors.ts";
 const USAGE = `lr — local review for agentic development
 
 Usage:
+  lr init                         write a commented .local-review.toml (checks and settings)
   lr feature start <slug> [--title <title>] [--base <revset>]
+                                  base: trunk() by default
   lr feature list
   lr feature abandon [<slug>]
   lr feature clean [<slug>…] [--purge]
@@ -38,6 +41,7 @@ Usage:
   lr plan show
   lr note <change> [<path>:<line>[-<line>] [--old]] "<text>"
                                   a note for reviewers on your change, instead of a code comment
+                                  (<change>: a change id, or a revset such as @-)
   lr review create [--allow-failing] [--skip-checks]
   lr check [<change>…] [--check <name,…>] [--round <n>] [--rerun]
                                   run checks by hand: on the stack now, or on a round's commits
@@ -81,6 +85,10 @@ const GLOBAL = {
 type Handler = (ctx: Context, args: string[]) => Promise<number>;
 
 const COMMANDS: Record<string, Handler> = {
+  init: async (ctx, args) => {
+    parse(args, {});
+    return init(ctx);
+  },
   "feature start": async (ctx, args) => {
     const { values, positionals } = parse(args, {
       title: { type: "string" },

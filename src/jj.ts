@@ -215,8 +215,12 @@ export class Jj {
     return out.split("\n").filter((l) => l.length > 0);
   }
 
-  /** Stop tracking a workspace; jj abandons its working-copy commit if it's empty. */
+  /**
+   * Stop tracking a workspace, and abandon its working-copy commit if it's empty. (jj abandons it
+   * on its own only when it has no description either.)
+   */
   async forgetWorkspace(name: string): Promise<void> {
+    await this.run(["abandon", `present(${revsetString(name)}@) & empty()`]);
     await this.run(["workspace", "forget", name]);
   }
 

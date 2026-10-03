@@ -1,10 +1,12 @@
-import { AnchorResolver, describeAnchor } from "../anchors.ts";
+import { AnchorResolver, describeAnchor, findLiveChange } from "../anchors.ts";
 import type { Context } from "../context.ts";
 import { LrError } from "../errors.ts";
 import type { Thread } from "../model.ts";
 import { takeSnapshot } from "../snapshot.ts";
 
-const USAGE = 'usage: lr note <change> [<path>:<line>[-<line>] [--old]] "<text>"';
+const USAGE =
+  'usage: lr note <change> [<path>:<line>[-<line>] [--old]] "<text>"\n' +
+  "<change>: a change id (or prefix), or a revset for one, such as @-";
 
 /** `src/db.ts:40` or `src/db.ts:40-42`. */
 const LOCATION = /^(\S+):(\d+)(?:-(\d+))?$/;
@@ -53,8 +55,9 @@ export async function note(
   const snap = await takeSnapshot(ctx.jj, feature.baseRevset, plan.phases, {
     beforeBookmarks: true,
   });
+  const target = await findLiveChange(ctx.jj.at(snap.jjOpId), snap.changes, change, "the stack");
   const anchor = await new AnchorResolver(ctx.jj, snap, plan.phases).resolve({
-    change,
+    change: target.changeId,
     phase: null,
     path: location ? location[1]! : null,
     lines,

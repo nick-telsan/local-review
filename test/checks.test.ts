@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type CheckSettings, checkTargets, runChecks } from "../src/checks.ts";
+import {
+  type CheckSettings,
+  checkTargets,
+  checkWorkspaceDescription,
+  runChecks,
+} from "../src/checks.ts";
 import type { CheckConfig } from "../src/config.ts";
 import { LrError } from "../src/errors.ts";
 import { Jj } from "../src/jj.ts";
@@ -160,6 +165,57 @@ describe("runChecks", () => {
     await Bun.$`rm -rf ${join(featureDir, "workspaces")}`;
     const again = await run(config);
     expect(again.results.map((r) => r.run.status)).toEqual(["fail"]);
+  });
+
+  describe("the workspace's commit", () => {
+    const config = (at: CheckConfig["at"]): CheckSettings => ({
+      setup: null,
+      setupKillAfterMs: 1000,
+      checks: [{ name: "c", run: "true", at, timeoutMs: 5000, killAfterMs: 1000 }],
+    });
+    /** Every commit lr's description is on, as `<change id> <parent's description>`. */
+    const parked = async () =>
+      (
+        await repo.jj(
+          "log",
+          "--no-graph",
+          "-r",
+          `description(substring:${JSON.stringify(checkWorkspaceDescription("feat"))})`,
+          "-T",
+          'change_id ++ " " ++ parents.map(|p| p.description().first_line()) ++ "\n"',
+        )
+      )
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+
+    test("is described as lr's, and moves instead of piling up", async () => {
+      await run(config("bookmarks"));
+      const [first] = await parked();
+      expect(first).toEndWith(" Rotate");
+      const wc = await repo.jj("log", "--no-graph", "-r", '"lr-feat-checks"@', "-T", "description");
+      expect(wc.trim()).toBe(checkWorkspaceDescription("feat"));
+
+      await repo.commit("Rotate more", { "rotate.ts": "y\n" });
+      await repo.bookmark("feat/2-rotation");
+      await run(config("tip"));
+      expect(await parked()).toEqual([`${first!.split(" ")[0]} Rotate more`]);
+    });
+
+    test("doesn't outlive a workspace whose directory was deleted", async () => {
+      const { featureDir } = await run(config("tip"));
+      await Bun.$`rm -rf ${join(featureDir, "workspaces")}`;
+      await run(config("tip"));
+      expect(await parked()).toHaveLength(1);
+    });
+
+    test("is described in a workspace made before lr described it", async () => {
+      const dir = join(repo.tmp, "feature", "workspaces", "checks");
+      mkdirSync(join(dir, ".."), { recursive: true });
+      await repo.jj("workspace", "add", "--name", "lr-feat-checks", "-r", "root()", dir);
+      await run(config("tip"));
+      expect(await parked()).toHaveLength(1);
+    });
   });
 
   const lockFile = () => join(repo.tmp, "feature", "workspaces", "checks.lock");

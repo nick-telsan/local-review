@@ -1,4 +1,4 @@
-import { findChange } from "../anchors.ts";
+import { findChange, findLiveChange } from "../anchors.ts";
 import { type CheckTarget, checkTargets, runChecks } from "../checks.ts";
 import { loadRepoConfig } from "../config.ts";
 import type { Context } from "../context.ts";
@@ -45,6 +45,8 @@ export async function check(
 
   let changes: ChangeSnapshot[];
   let where: string;
+  /** A round's changes are named by change id; the live stack's by a revset too. */
+  let find = async (arg: string) => findChange(changes, arg, where);
   let round: number | null = null;
   const plan = ctx.currentPlan(feature);
   let phases = plan.phases;
@@ -63,10 +65,11 @@ export async function check(
     for (const w of snap.warnings) progress(ctx, `warning: ${w}`);
     changes = snap.changes;
     where = "the stack";
+    find = (arg) => findLiveChange(ctx.jj.at(snap.jjOpId), changes, arg, where);
   }
 
   const targets: CheckTarget[] = changeArgs.length
-    ? [...new Set(changeArgs.map((arg) => findChange(changes, arg, where)))].flatMap((change) =>
+    ? [...new Set(await Promise.all(changeArgs.map(find)))].flatMap((change) =>
         checks.map((c) => ({ check: c, change })),
       )
     : checkTargets(checks, changes, phases);

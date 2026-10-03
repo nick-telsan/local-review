@@ -210,6 +210,43 @@ export function findChange(
   throw new LrError(`change "${prefix}" is ambiguous in ${where}`);
 }
 
+/**
+ * Like `findChange`, for the live stack: a change can also be named by a revset, such as `@-` or a
+ * bookmark, that resolves to one of its changes. `jj` should be pinned to the stack's operation.
+ */
+export async function findLiveChange(
+  jj: Jj,
+  changes: ChangeSnapshot[],
+  arg: string,
+  where: string,
+): Promise<ChangeSnapshot> {
+  if (changes.some((c) => c.changeId.startsWith(arg))) return findChange(changes, arg, where);
+  let found: Awaited<ReturnType<Jj["commits"]>>;
+  try {
+    found = await jj.commits(arg);
+  } catch {
+    // Not a revset either: say what is in the stack.
+    return findChange(changes, arg, where);
+  }
+  if (found.length !== 1) {
+    throw new LrError(`"${arg}" is ${found.length} commits; name one change`);
+  }
+  const commit = found[0]!;
+  const change = changes.find((c) => c.changeId === commit.changeId);
+  if (change) return change;
+  const available = changes.map((c) => c.changeId.slice(0, 8)).join(", ");
+  const [wc] = await jj.commits("@");
+  const what =
+    commit.changeId === wc!.changeId
+      ? " (the working copy; its parent is @-)"
+      : commit.commitId === "0".repeat(40)
+        ? " (the root commit)"
+        : "";
+  throw new LrError(
+    `${arg} is ${commit.changeId.slice(0, 8)}${what}, which isn't in ${where} (changes: ${available})`,
+  );
+}
+
 /** Position of a ref in a round's stack; the base is -1, and a change not in it is -1 too. */
 export function refIndex(round: Stack, ref: RevRef): number {
   return ref === "base" ? -1 : round.changes.findIndex((c) => c.changeId === ref.changeId);

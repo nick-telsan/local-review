@@ -30,8 +30,12 @@ messages. You revise the stack in place and answer every thread. Only the develo
 Run `lr status` first, since a feature may already exist. To start one:
 
 ```sh
-lr feature start <slug> --base 'trunk()'   # slug: lowercase-with-hyphens; it prefixes bookmarks
+lr feature start <slug>   # slug: lowercase-with-hyphens; it prefixes bookmarks
 ```
+
+The base defaults to `trunk()`. If lr refuses it because `@` builds on a bookmark above it, check
+with the developer before passing the `--base` it suggests. Stacking on another feature's bookmark
+is a choice, not a default.
 
 Write the plan as markdown with a `phases:` frontmatter block. [plan-format.md](plan-format.md)
 has the format and what makes a good phase. Show the plan to the developer before submitting it,
@@ -70,7 +74,7 @@ if the working copy isn't already there.
 When a reviewer would otherwise stop and ask "why?", leave a note instead of a comment in the code:
 
 ```sh
-lr note <change> "<why this change is shaped this way>"
+lr note <change> "<why this change is shaped this way>"        # <change>: an id, or a revset like @-
 lr note <change> <path>:<line>[-<line>] "<why these lines>"   # new-side lines of the change's diff
 lr note <change> <path>:<line> --old "<why this was removed>"
 ```
@@ -84,7 +88,8 @@ other comment, so answer it the same way.
 ## 3. Open a review round
 
 When every phase is done, or the developer asks for a round, run `lr review create`. It snapshots
-the stack, runs the checks in `.local-review.toml`, and opens round N.
+the stack, runs the checks in `.local-review.toml`, and opens round N. Checks run in a separate
+workspace, whose empty commit (`lr-<slug>-checks@` in `jj log`) is lr's: leave it alone.
 
 - Exit code 1 means no round was opened. Either a check failed (the output has its log path) or a
   change is conflicted. Fix it in the change where it belongs, confirm with

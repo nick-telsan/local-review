@@ -121,7 +121,7 @@ describe("lr repo relink", () => {
 
   test("won't merge into a repo that has history of its own", async () => {
     const moved = repo.moveTo("moved");
-    await lr(moved, "feature", "start", "other");
+    await lr(moved, "feature", "start", "other", "--base", "main");
     expect(await err(moved, old)).toContain(
       `this repo already has review history (other), so lr can't bring ${old}'s along`,
     );
