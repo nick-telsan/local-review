@@ -1,0 +1,158 @@
+# Publishes the version in package.json: run it from the Actions tab once main has the bump.
+# It checks the commit, builds lr for macOS and Linux, publishes a GitHub release (which creates
+# the v<version> tag), updates the formula in the tap, and installs from the tap on macOS and Linux
+# to confirm.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+
+env:
+  TAP: ${{ github.repository_owner }}/homebrew-tap
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: version
+        name: Read the version, and refuse one that's released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" != refs/heads/main ]; then
+            echo "::error::Release from main, not $REF." && exit 1
+          fi
+          version=$(jq -r .version package.json)
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "::error::v$version is already released. Bump the version in package.json and plugin/.claude-plugin/plugin.json first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup
+      - run: bun run check
+
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          # macOS binaries are built on a Mac, where Bun signs them: Apple Silicon won't run an
+          # unsigned one. Each runner smoke-tests the binary it can run.
+          - { runner: macos-latest, os: darwin, native: arm64, cross: x64 }
+          - { runner: ubuntu-latest, os: linux, native: x64, cross: arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      OS: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Build
+        run: |
+          mkdir -p release
+          for arch in ${{ matrix.native }} ${{ matrix.cross }}; do
+            bun run build --target="bun-$OS-$arch"
+            tar -czf "release/lr-$VERSION-$OS-$arch.tar.gz" -C dist lr
+          done
+      - name: Smoke-test the ${{ matrix.native }} binary
+        run: |
+          mkdir -p smoke
+          tar -xzf "release/lr-$VERSION-$OS-${{ matrix.native }}.tar.gz" -C smoke
+          scripts/smoke-test.sh smoke/lr
+          [ "$(smoke/lr --version)" = "lr $VERSION" ]
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lr-${{ matrix.os }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: lr-*
+          path: release
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          sha256sum lr-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "lr $VERSION" --generate-notes lr-*.tar.gz SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sha256sums
+          path: release/SHA256SUMS
+
+  tap:
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sha256sums
+      - name: Update the formula in the tap
+        env:
+          # A fine-grained token with contents read/write on the tap only.
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          gh auth setup-git
+          git clone "https://github.com/$TAP.git" tap
+          mkdir -p tap/Formula
+          bun scripts/formula.ts --repo "$GITHUB_REPOSITORY" --version "$VERSION" \
+            --sums SHA256SUMS > tap/Formula/local-review.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/local-review.rb
+          # A rerun after a push that went through has nothing to commit.
+          git diff --cached --quiet || git commit -m "local-review $VERSION"
+          git push origin HEAD:main
+
+  verify:
+    needs: [prepare, tap]
+    strategy:
+      matrix:
+        runner: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Install from the tap
+        run: |
+          # ubuntu-latest has Homebrew, but not on its PATH.
+          if [ "$RUNNER_OS" = Linux ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
+          brew install "$TAP/local-review"
+          brew test "$TAP/local-review"
+          [ "$(lr --version)" = "lr $VERSION" ]
+          jj --version

@@ -47,4 +47,4 @@ script=$(echo "$page" | sed -n 's/.*<script[^>]*src="\([^"]*\)".*/\1/p' | head -
 [ -n "$script" ] || { echo "no script in the page" >&2; echo "$page" >&2; exit 1; }
 curl -fsS -o /dev/null "$origin/${script#/}"
 curl -fsS -H "Authorization: Bearer $token" "$origin/api/features" | grep -q '"smoke"'
-echo "Smoke test passed: $("$lr" --help | head -n 1)"
+echo "Smoke test passed: $("$lr" --version)"
