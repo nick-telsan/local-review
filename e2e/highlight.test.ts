@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect } from "bun:test";
 import type { Locator } from "playwright-core";
-import { closeBrowser, expectTexts, flow, openBrowser, until } from "./harness.ts";
+import { addComment, closeBrowser, expectTexts, flow, openBrowser, until } from "./harness.ts";
 
 beforeAll(openBrowser, 30_000);
 afterAll(closeBrowser);
@@ -15,7 +15,7 @@ const colorOf = (line: Locator, text: string) =>
 const plainColor = (line: Locator) => line.evaluate((cell) => getComputedStyle(cell).color);
 
 flow(
-  "highlights a diff's code by its file's type, in light and dark",
+  "highlights a diff's code by its file's type, and a comment's code block, in light and dark",
   async ({ page, open, c1 }) => {
     await open(`/f/feat/r/1/c/${c1}`);
     const code = page.getByRole("region", { name: "app.ts" }).getByTestId("line-text");
@@ -37,12 +37,22 @@ flow(
     await expectTexts(notes, ["+some notes"]);
     expect(await colorOf(notes, "some notes")).toBe(await plainColor(notes));
 
+    // A fenced code block in a comment is highlighted the same way.
+    await page.getByRole("button", { name: "+ Comment on this change" }).click();
+    const draft = await addComment(page, "Or:\n\n```ts\nconst t = 1;\n```");
+    const block = draft.getByRole("code");
+    await expectTexts(block, ["const t = 1;\n"]);
+    await until("the comment's code is highlighted", async () => {
+      return (await colorOf(block, "const")) === keyword;
+    });
+
     await page.emulateMedia({ colorScheme: "dark" });
     await until("the colors are dark mode's", async () => {
       return (await colorOf(last, "const")) !== keyword;
     });
     expect(await colorOf(second, "over lines")).toBe(await colorOf(first, "A comment"));
     expect(await colorOf(second, "over lines")).not.toBe(comment);
+    expect(await colorOf(block, "const")).toBe(await colorOf(last, "const"));
   },
   {
     files: [

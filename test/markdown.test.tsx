@@ -1,8 +1,15 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { prerender } from "react-dom/static";
 import { Markdown } from "../src/web/Markdown.tsx";
 
 const html = (text: string) => renderToStaticMarkup(<Markdown text={text} />);
+
+/** The markup once everything has loaded, highlighting included. */
+const loaded = async (text: string) => {
+  const { prelude } = await prerender(<Markdown text={text} />);
+  return new Response(prelude).text();
+};
 
 test("GitHub-flavored: tables, task lists, strikethrough, autolinks", () => {
   const out = html(
@@ -52,4 +59,33 @@ test("in comments and the PR body, each newline is a line break, as on GitHub", 
   expect(renderToStaticMarkup(<Markdown text={text} breaks className="body" />)).toBe(
     '<div class="markdown body"><p>Two things:<br/>\nfirst<br/>\nsecond</p></div>',
   );
+});
+
+test("a fenced block in a language with a grammar is highlighted; other code stays plain", async () => {
+  const out = await loaded(
+    [
+      "```ts",
+      "const a = 1;",
+      "```",
+      "",
+      "```",
+      "plain",
+      "```",
+      "",
+      "```cobol",
+      "x",
+      "```",
+      "",
+      "`const b`",
+    ].join("\n"),
+  );
+  expect(out).toMatch(
+    /<code class="language-ts"><!--\$--><span class="tok" style="--shiki-light:#[0-9A-F]{6};--shiki-dark:#[0-9A-F]{6}">const<\/span>/,
+  );
+  expect(out).toContain('<span class="tok">\n</span><!--/$--></code>');
+  expect(out).toContain("<pre><code>plain\n</code></pre>");
+  expect(out).toContain('<pre><code class="language-cobol">x\n</code></pre>');
+  expect(out).toContain("<code>const b</code>");
+  // Before it's highlighted, it's the same text.
+  expect(html("```ts\nconst c = 3;\n```")).toContain("const c = 3;\n");
 });

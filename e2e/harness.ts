@@ -183,7 +183,9 @@ export async function addComment(page: Page, body: string, severity?: string): P
       .click();
   }
   await page.getByRole("button", { name: "Add to review" }).click();
-  const draft = page.getByRole("article", { name: "Draft comment" }).filter({ hasText: body });
+  // By its first line: the rest may render as markdown, unlike what was typed.
+  const first = body.split("\n")[0]!;
+  const draft = page.getByRole("article", { name: "Draft comment" }).filter({ hasText: first });
   await draft.waitFor();
   return draft;
 }

@@ -239,3 +239,13 @@ export async function highlightHunk(lines: DiffLine[], lang: Lang): Promise<Toke
     ];
   });
 }
+
+/** Lines' tokens as one run, with the newlines between them, as a code block shows them. */
+export function joinLines(lines: Token[][]): Token[] {
+  let at = 0;
+  return lines.flatMap((line, i) => {
+    const start = at;
+    at += line.reduce((n, t) => n + t.text.length, 0) + 1;
+    return i === 0 ? line : [{ text: "\n", offset: start - 1, style: {} }, ...line];
+  });
+}

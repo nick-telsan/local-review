@@ -48,9 +48,9 @@ Then, in Claude Code, ask for a feature: "Use lr to add refresh token rotation."
 feature, writes a plan in phases, and shows it to you. Once you agree, it implements the plan one
 commit per task and opens a review round. Then:
 
-1. **Review.** `lr ui` opens the round in your browser: comment on lines, commit messages, or the
-   plan, then finish with a verdict. For an agent's review first, run `/local-review:lr-review` in
-   another Claude session.
+1. **Review.** `lr ui` opens the round in your browser, with its diffs syntax-highlighted. Comment
+   on lines, commit messages, or the plan, then finish with a verdict. For an agent's review
+   first, run `/local-review:lr-review` in another Claude session.
 2. **Revise.** Tell Claude the round is reviewed. It reads `lr handoff`, amends the commits in place,
    replies to each thread, and opens the next round. `lr diff` (or "since last review" in the UI)
    shows what changed.

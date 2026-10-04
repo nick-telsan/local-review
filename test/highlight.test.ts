@@ -5,6 +5,7 @@ import {
   fenceLanguage,
   highlight,
   highlightHunk,
+  joinLines,
   LANGS,
   type Lang,
   languageOf,
@@ -181,4 +182,13 @@ test("a CRLF line keeps its \\r, as a token of its own, on either side", async (
   // The comment still spans its lines.
   expect(color(tokens[1]!, "b */")).toBe(color(tokens[0]!, "/* a"));
   expect(color(tokens[2]!, "c */")).toBe(color(tokens[0]!, "/* a"));
+});
+
+test("lines join into one run, with a newline token between each", async () => {
+  const lines = (await highlight("const a = 1;\n\n// two\n", "typescript"))!;
+  const run = joinLines(lines);
+  expect(run.map((t) => t.text).join("")).toBe("const a = 1;\n\n// two\n");
+  expect(new Set(run.map((t) => t.offset)).size).toBe(run.length);
+  expect(run.filter((t) => t.text === "\n").map((t) => t.offset)).toEqual([12, 13, 20]);
+  expect(joinLines([])).toEqual([]);
 });
