@@ -55,12 +55,19 @@ export function ThreadCard({
   const snippet = "snippet" in t.anchor ? t.anchor.snippet : [];
   return (
     // Focusable, so `n`/`p` can select it and Tab goes on to its buttons.
-    <article className={`thread thread-${t.status}`} id={`thread-${t.id}`} tabIndex={-1}>
+    <article
+      className={`thread thread-${t.status}`}
+      id={`thread-${t.id}`}
+      tabIndex={-1}
+      aria-label={`Thread #${t.id}`}
+    >
       <header className="thread-head">
         <a href={`#thread-${t.id}`} className="thread-id">
           #{t.id}
         </a>
-        <Pill kind={t.status}>{t.status}</Pill>
+        <Pill kind={t.status} testId="thread-status">
+          {t.status}
+        </Pill>
         {t.severity && <Pill kind={t.severity}>{t.severity}</Pill>}
         {t.kind === "note" && <Pill kind="note">author's note</Pill>}
         {t.anchorState !== "current" && (

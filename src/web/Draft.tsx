@@ -42,7 +42,7 @@ export function DraftCard({
     );
   }
   return (
-    <article className="thread draft">
+    <article className="thread draft" aria-label="Draft comment">
       <header className="thread-head">
         <Pill kind="draft">draft</Pill>
         {c.severity && <Pill kind={c.severity}>{c.severity}</Pill>}

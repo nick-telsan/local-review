@@ -22,3 +22,35 @@ jobs:
       - run: bun run check
       - run: bun run build
       - run: scripts/smoke-test.sh dist/lr
+
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      # The playwright-core version fixes the browser build, so it keys the browser's cache.
+      - name: Find the Playwright version
+        id: playwright
+        run: echo "version=$(bun -p 'require("playwright-core/package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Cache the browser
+        id: browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - name: Install the browser and its system libraries
+        if: steps.browser.outputs.cache-hit != 'true'
+        run: bun run e2e:install --with-deps
+      # The libraries live outside the cache.
+      - name: Install the browser's system libraries
+        if: steps.browser.outputs.cache-hit == 'true'
+        run: node_modules/.bin/playwright-core install-deps chromium-headless-shell
+      - run: bun run e2e
+      - name: Upload traces of failed flows
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-traces
+          path: e2e/results/
+          if-no-files-found: ignore

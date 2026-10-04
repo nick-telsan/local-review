@@ -38,6 +38,7 @@ claude --plugin-dir plugin       # or try it for one session, without installing
 bun run check       # lint, typecheck, and tests with coverage; run it before calling work done
 bun run fix         # Biome format plus safe lint fixes
 bun test test/snapshot.test.ts   # a focused run; coverage thresholds only apply to bun run test
+bun run e2e         # the browser tests (once: bun run e2e:install, for headless Chromium)
 bun run lr <args>   # run the CLI from source
 claude plugin validate . && claude plugin validate plugin   # after editing the plugin
 ```
@@ -83,7 +84,10 @@ into the page.
 `src/web/` is the React app `lr ui` serves; `src/ui/` is its server and API. The API's types live
 in `src/ui/api.ts`, and `src/web/` imports them type-only. The only runtime code it shares is
 `src/patch.ts`, which must stay free of Bun APIs, since it runs in the browser too. Tests cover the
-server and API against real repos; the React code has no tests yet, so check UI changes in a
+server and API against real repos, and the browser tests in `e2e/` cover the page's main flows:
+opening a round, commenting and submitting a verdict, threads, "since last review", the plan's
+task coverage, the keyboard shortcuts, and a final round. A change to one of those flows updates
+its test. They check that a flow works, not how it looks, so still look at UI changes in a
 browser. With `LR_UI_DEV=1`, `lr ui` serves the page with hot reloading.
 
 ## Claude Code plugin
@@ -101,12 +105,30 @@ mention must exist, and their example plan and review must pass lr's validators.
 - Coverage must stay at ≥90% lines and functions **per file**. Bun has no branch coverage, so
   test error paths deliberately.
 
+The browser tests in `e2e/` run apart from these: `bunfig.toml` limits a bare `bun test` to
+`test/`, so `bun run check` doesn't need a browser. They drive headless Chromium with
+`playwright-core` from `bun test`:
+
+- Write each one as a `flow()` from `e2e/harness.ts`. It builds the same stack as
+  `test/ui.test.ts` (two phases, a change in each, round 1), serves `lr ui` in-process as
+  `human:nick`, and opens a page; set up anything more with `lr()` before opening it.
+- Select by role and accessible name (`getByRole("button", { name: "New line 2" })`), as a person
+  finds things. Where the UI has no name to find something by, give it one (an `aria-label`).
+  Where a name doesn't fit, as for a line's text apart from its numbers or a thread's status, add
+  a `data-testid` (`getByTestId("line-text")`). Don't select by CSS class: classes are for styling,
+  and change with it.
+- Wait, don't assert on the spot: `bun:test`'s `expect` doesn't retry the way Playwright's does.
+  Use `locator.waitFor()` and `expectTexts()`, and plain `expect` only for what has settled.
+- A flow fails on any error the page throws or logs. When one fails, its trace is in
+  `e2e/results/`; open it with `bunx playwright-core show-trace <file>`.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes to main and on PRs, on Linux: `bun run check`, then a
 build, then `scripts/smoke-test.sh`, which runs the compiled binary in a throwaway repo and checks
-that `lr ui` serves the page and the API. The tests run on macOS locally and on Linux in CI, so keep
-them free of either's paths and tools.
+that `lr ui` serves the page and the API. A second job, `ui`, runs the browser tests, with the
+browser cached by the `playwright-core` version, and uploads a failing flow's trace as an artifact.
+The tests run on macOS locally and on Linux in CI, so keep them free of either's paths and tools.
 
 `.github/actions/setup` installs Bun from `.tool-versions` and jj from its release, pinned by
 version and a checksum per platform. To move to a new jj, update the version and all four
