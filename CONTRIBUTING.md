@@ -57,9 +57,9 @@ the why isn't obvious.
 `bunfig.toml` pins exact versions and refuses packages published less than 3 days ago. Don't
 bypass either (no `--minimum-release-age=0`, no `^` ranges). Avoid runtime dependencies:
 `bun:sqlite`, `Bun.YAML`, `Bun.TOML`, `Bun.spawn`, and `node:util` `parseArgs` cover what we
-need so far. The exceptions are React (`react`, `react-dom`) and markdown rendering
-(`react-markdown`, `remark-gfm`, `remark-breaks`), which only the web UI uses and which are bundled
-into the page.
+need so far. The exceptions are React (`react`, `react-dom`), markdown rendering
+(`react-markdown`, `remark-gfm`, `remark-breaks`), and syntax highlighting (`shiki`). Only the web
+UI uses them, and they're bundled into the page.
 
 ## Code conventions
 
@@ -86,9 +86,13 @@ in `src/ui/api.ts`, and `src/web/` imports them type-only. The only runtime code
 `src/patch.ts`, which must stay free of Bun APIs, since it runs in the browser too. Tests cover the
 server and API against real repos, and the browser tests in `e2e/` cover the page's main flows:
 opening a round, commenting and submitting a verdict, threads, "since last review", the plan's
-task coverage, the keyboard shortcuts, and a final round. A change to one of those flows updates
-its test. They check that a flow works, not how it looks, so still look at UI changes in a
-browser. With `LR_UI_DEV=1`, `lr ui` serves the page with hot reloading.
+task coverage, the keyboard shortcuts, a final round, and syntax highlighting. A change to one of
+those flows updates its test. They check that a flow works, not how it looks, so still look at UI
+changes in a browser. With `LR_UI_DEV=1`, `lr ui` serves the page with hot reloading.
+
+The languages the UI highlights are listed in `src/web/highlight.ts`. Every grammar listed is
+bundled into the page, and so into `lr`, so check what one adds before listing it. A grammar can
+import others for the code it embeds: Ruby's brings C++, Lua and a dozen more, about 1.25 MB.
 
 ## Claude Code plugin
 

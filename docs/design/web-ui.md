@@ -82,6 +82,26 @@ like the plan, with each newline a line break, as GitHub treats comments and PR 
 PR body shows as numbered lines while its round takes comments (they go on lines), and rendered
 otherwise; a toggle switches. Suggestions and commit messages stay plain text.
 
+**Syntax highlighting.** Diffs, and fenced code blocks with a language, are highlighted with Shiki
+(`src/web/highlight.ts`) in GitHub's light and dark themes:
+
+- **Colors.** Each token carries both themes' colors as CSS variables, and `style.css` picks one
+  with `prefers-color-scheme`. Highlighting only sets the text's color and font style, so a row's
+  background still shows added, removed, commented and picked lines.
+- **Grammars.** A file's grammar comes from its extension or name, and a code block's from its
+  fence. Anything else stays plain. The grammars are bundled into the page, since Bun's HTML
+  bundling doesn't split `import()`. Each is compiled the first time it's used.
+- **Hunks.** A hunk's old side (context and removed lines) and its new side (context and added
+  lines) are each highlighted as one text, then split back into rows. So a block comment or a
+  string that spans lines within the hunk colors correctly. One that starts above the hunk can't,
+  since the API serves only the patch, not the whole file.
+- **It never holds up the page:**
+  - a diff shows plain, and colors a hunk at a time once its file is open, yielding between hunks;
+  - a code block shows plain until its highlight is ready;
+  - files over 5,000 diff lines, and lines over 1,000 characters, stay plain.
+- **Caching.** Results are cached by language and text, since the page refetches what it shows
+  after every write.
+
 **Since an earlier round.** A round can show only what changed since an earlier one: by default
 the last round the actor reviewed (the round view's `lastReviewed`), else the one before. It's
 `?since=<n>` in the address, and off unless asked for. The sidebar marks each change changed, new,

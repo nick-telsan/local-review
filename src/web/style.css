@@ -658,6 +658,22 @@ table.diff td.code {
   color: var(--muted);
   user-select: none;
 }
+/* Highlighted code (highlight.ts). Each token carries both themes' colors and font styles as
+   variables; a token without one takes the text's own. */
+.tok {
+  color: var(--shiki-light, inherit);
+  font-style: var(--shiki-light-font-style, inherit);
+  font-weight: var(--shiki-light-font-weight, inherit);
+  text-decoration: var(--shiki-light-text-decoration, inherit);
+}
+@media (prefers-color-scheme: dark) {
+  .tok {
+    color: var(--shiki-dark, inherit);
+    font-style: var(--shiki-dark-font-style, inherit);
+    font-weight: var(--shiki-dark-font-weight, inherit);
+    text-decoration: var(--shiki-dark-text-decoration, inherit);
+  }
+}
 tr.add td.code {
   background: var(--add-bg);
 }

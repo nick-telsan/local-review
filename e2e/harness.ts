@@ -44,7 +44,7 @@ export async function closeBrowser(): Promise<void> {
 
 export interface Ui {
   repo: TestRepo;
-  /** The change in phase 1 (adds db.ts) and the one in phase 2 (adds rotate.ts). */
+  /** The change in phase 1 (adds db.ts, by default) and the one in phase 2 (adds rotate.ts). */
   c1: string;
   c2: string;
   page: Page;
@@ -56,6 +56,8 @@ export interface Ui {
 export interface FlowOptions {
   /** The two changes' messages, e.g. to give one a `Plan-Task` trailer. */
   messages?: [string, string];
+  /** The files each change adds, in place of `db.ts` and `rotate.ts`. */
+  files?: [Record<string, string>, Record<string, string>];
 }
 
 /**
@@ -69,12 +71,13 @@ export function flow(name: string, fn: (ui: Ui) => Promise<void>, opts: FlowOpti
     name,
     async () => {
       const [m1, m2] = opts.messages ?? ["Add db\n\nWith a body.", "Rotate"];
+      const [f1, f2] = opts.files ?? [{ "db.ts": "a\nb\nc\n" }, { "rotate.ts": "r1\nr2\n" }];
       const repo = await TestRepo.create();
       await repo.commit("base", { "README.md": "hello\n" });
       await repo.bookmark("main");
-      const c1 = await repo.commit(m1, { "db.ts": "a\nb\nc\n" });
+      const c1 = await repo.commit(m1, f1);
       await repo.bookmark("feat/1-schema");
-      const c2 = await repo.commit(m2, { "rotate.ts": "r1\nr2\n" });
+      const c2 = await repo.commit(m2, f2);
       await repo.bookmark("feat/2-rotation");
       await lr(repo, "feature", "start", "feat", "--base", "main");
       await Bun.write(join(repo.tmp, "plan.md"), TWO_PHASE_PLAN);
@@ -157,6 +160,15 @@ export async function expectTexts(locator: Locator, texts: string[]): Promise<vo
   expect(seen).toEqual(texts);
 }
 
+/** Wait until `ok` holds, failing with `what` after a while. */
+export async function until(what: string, ok: () => Promise<boolean>): Promise<void> {
+  const until = Date.now() + ACTION_MS;
+  while (!(await ok())) {
+    if (Date.now() > until) throw new Error(`Timed out waiting until ${what}`);
+    await Bun.sleep(50);
+  }
+}
+
 /**
  * Write `body` in the open comment form (with a severity, if given) and add it to the review.
  * Returns the draft, once it shows.
@@ -171,7 +183,9 @@ export async function addComment(page: Page, body: string, severity?: string): P
       .click();
   }
   await page.getByRole("button", { name: "Add to review" }).click();
-  const draft = page.getByRole("article", { name: "Draft comment" }).filter({ hasText: body });
+  // By its first line: the rest may render as markdown, unlike what was typed.
+  const first = body.split("\n")[0]!;
+  const draft = page.getByRole("article", { name: "Draft comment" }).filter({ hasText: first });
   await draft.waitFor();
   return draft;
 }
