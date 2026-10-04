@@ -58,6 +58,14 @@
   box-sizing: border-box;
 }
 
+/* Code reads as typed: no `<=` or `!=` drawn as one glyph (JetBrains Mono, Fira Code, …). On every
+   element, since form controls don't inherit font settings. */
+*,
+::before,
+::after {
+  font-variant-ligatures: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
