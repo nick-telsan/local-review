@@ -156,3 +156,22 @@ export async function expectTexts(locator: Locator, texts: string[]): Promise<vo
   }
   expect(seen).toEqual(texts);
 }
+
+/**
+ * Write `body` in the open comment form (with a severity, if given) and add it to the review.
+ * Returns the draft, once it shows.
+ */
+export async function addComment(page: Page, body: string, severity?: string): Promise<Locator> {
+  await page.getByRole("textbox", { name: "Comment" }).fill(body);
+  // The radios hide behind their labels, which are what a person clicks.
+  if (severity) {
+    await page
+      .getByRole("group", { name: "Severity" })
+      .getByText(severity, { exact: true })
+      .click();
+  }
+  await page.getByRole("button", { name: "Add to review" }).click();
+  const draft = page.getByRole("article", { name: "Draft comment" }).filter({ hasText: body });
+  await draft.waitFor();
+  return draft;
+}
