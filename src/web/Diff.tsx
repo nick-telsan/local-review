@@ -1,8 +1,10 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { type DiffHunk, type DiffLine, type FileDiff, filePath } from "../patch.ts";
 import type { DraftComment, Placement, ThreadView } from "../ui/api.ts";
+import { Tokens } from "./Code.tsx";
 import { CommentForm } from "./CommentForm.tsx";
 import { DraftCard } from "./Draft.tsx";
+import { diffLanguage, highlightHunk, type Token } from "./highlight.ts";
 import { useLinePicker } from "./picker.ts";
 import { draftsOn, useReview } from "./review.tsx";
 import { ThreadCard } from "./Thread.tsx";
@@ -44,6 +46,7 @@ export function FileDiffView({
   const lineCount = file.hunks.reduce((n, h) => n + h.lines.length, 0);
   const [open, setOpen] = useState(lineCount <= COLLAPSE_LINES);
   const picker = useLinePicker<Side>();
+  const tokens = useHighlight(file, open);
 
   const items: Item[] = [
     ...threads.flatMap((t): Item[] =>
@@ -163,14 +166,14 @@ export function FileDiffView({
                 <col />
               </colgroup>
               <tbody>
-                {file.hunks.map((h) => (
+                {file.hunks.map((h, hunk) => (
                   <Fragment key={`${h.oldStart}:${h.newStart}`}>
                     <tr className="hunk-head">
                       <td colSpan={3}>
                         @@ −{h.oldStart},{h.oldCount} +{h.newStart},{h.newCount} @@
                       </td>
                     </tr>
-                    {h.lines.map((l) => (
+                    {h.lines.map((l, i) => (
                       <Fragment key={`${l.oldLine ?? ""}:${l.newLine ?? ""}`}>
                         <tr
                           className={`line ${l.kind}${isCommented(l) ? " commented" : ""}${
@@ -183,7 +186,7 @@ export function FileDiffView({
                             <span className="sign">
                               {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
                             </span>
-                            {l.text}
+                            {tokens?.[hunk]?.[i] ? <Tokens tokens={tokens[hunk][i]} /> : l.text}
                             {l.noNewline && (
                               <span className="no-newline" title="No newline at end of file">
                                 ⏎̸
@@ -234,6 +237,41 @@ export function FileDiffView({
       )}
     </section>
   );
+}
+
+/**
+ * The file's tokens, by hunk and line, once highlighted; null until then, and for a file left plain
+ * (`diffLanguage`). Hunks are highlighted one at a time after the diff shows, yielding between them,
+ * so the page stays responsive and the rows color as each is done.
+ */
+function useHighlight(file: FileDiff, enabled: boolean): Token[][][] | null {
+  const lang = enabled ? diffLanguage(file) : null;
+  // The page refetches the diff after every write: start over only when its text changes. Files
+  // left plain, often the biggest diffs, skip building this key.
+  const text = useMemo(
+    () => (lang ? JSON.stringify(file.hunks.map((h) => h.lines.map((l) => [l.kind, l.text]))) : ""),
+    [file, lang],
+  );
+  const [done, setDone] = useState<{ text: string; hunks: Token[][][] } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `text` stands for `file.hunks`
+  useEffect(() => {
+    if (!lang) return;
+    let stopped = false;
+    (async () => {
+      const hunks: Token[][][] = [];
+      for (const h of file.hunks) {
+        const tokens = await highlightHunk(h.lines, lang);
+        if (stopped || !tokens) return;
+        hunks.push(tokens);
+        setDone({ text, hunks: [...hunks] });
+        await new Promise((resolve) => setTimeout(resolve));
+      }
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [text, lang]);
+  return lang && done?.text === text ? done.hunks : null;
 }
 
 /** A diff to read, not comment on, like a message edit or a plan revision. */
