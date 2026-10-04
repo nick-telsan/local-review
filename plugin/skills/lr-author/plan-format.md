@@ -8,18 +8,18 @@ scope.
 ---
 phases:
   - id: 1
-    title: Schema + migration
+    title: "Schema + migration"
     done_when: migrations apply cleanly to an empty and to a seeded database
     tasks:
-      - { id: "1.1", title: Add refresh_tokens table }
-      - { id: "1.2", title: Backfill existing sessions }
+      - { id: "1.1", title: "Add refresh_tokens table" }
+      - { id: "1.2", title: "Backfill existing sessions" }
   - id: 2
-    title: Token rotation
+    title: "Token rotation"
     bookmark: auth-refresh/rotation
     done_when: a refresh token works once, and reusing it revokes its whole family
     tasks:
-      - { id: "2.1", title: Rotate on use }
-      - { id: "2.2", title: Revoke the family on reuse }
+      - { id: "2.1", title: "Rotate on use" }
+      - { id: "2.2", title: "Revoke the family on reuse" }
 ---
 # Refresh token rotation
 
@@ -36,7 +36,9 @@ Each phase has:
 | `done_when` | no       | Acceptance criteria. Reviewers check the phase against it.                      |
 | `tasks`     | no       | `{ id, title }` items. Ids are unique across the plan; quote them (`"1.1"`).    |
 
-`lr plan submit` checks the frontmatter and lists every problem at once.
+Quote titles, as the example does. In `{ … }`, an unquoted title ends at its first comma, and YAML
+reads the rest as more keys. `lr plan submit` checks the frontmatter, rejects fields it doesn't
+know, and lists every problem at once.
 
 ## Good phases
 

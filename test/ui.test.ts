@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReviewSubmitOk } from "../src/commands/submit.ts";
 import type { ReplyOk } from "../src/commands/thread.ts";
 import type { UiOk } from "../src/commands/ui.ts";
 import { Context } from "../src/context.ts";
-import { repoDir } from "../src/paths.ts";
+import { featureDir, repoDir } from "../src/paths.ts";
 import type {
   ChangeView,
   FeaturesOk,
@@ -465,6 +465,18 @@ describe("the plan", () => {
     });
     // The earlier round keeps the plan it was taken against.
     expect((await json<PlanView>("/features/feat/rounds/1/plan")).version).toBe(1);
+  });
+
+  test("a stored plan that today's checks would reject still shows", async () => {
+    // Plans saved before lr rejected unknown keys can have them.
+    const file = join(featureDir(repo.root, "feat"), "plan", "v1.md");
+    writeFileSync(
+      file,
+      readFileSync(file, "utf8").replace(/title: "?Add table"?/, "title: Add a, b"),
+    );
+    const view = await json<PlanView>("/features/feat/rounds/1/plan");
+    expect(view.versions[0]!.text).toContain("title: Add a, b }");
+    expect(view.versions[0]!.body).toBe("# Plan\n\nBody.\n");
   });
 
   test("comments on the plan's lines are drafted against the round's version", async () => {

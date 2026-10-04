@@ -74,12 +74,12 @@ can't approve as you by accident. In Claude Code's `!` commands, pass `--as <you
 ---
 phases:
   - id: 1
-    title: Schema + migration
+    title: "Schema + migration"
     done_when: migrations apply cleanly
     tasks:
-      - { id: "1.1", title: Add refresh_tokens table }
+      - { id: "1.1", title: "Add refresh_tokens table" }
   - id: 2
-    title: Token rotation
+    title: "Token rotation"
     bookmark: auth-refresh/rotation   # default: <feature>/<id>-<title-slug>
 ---
 # Refresh token rotation

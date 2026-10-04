@@ -56,24 +56,28 @@ understand: phases, their bookmarks, and tasks. The body is freeform.
 ---
 phases:
   - id: 1
-    title: Schema + migration
+    title: "Schema + migration"
     bookmark: auth-refresh/1-schema
     done_when: migrations apply cleanly; `bun test db` passes
     tasks:
-      - { id: "1.1", title: Add refresh_tokens table }
-      - { id: "1.2", title: Backfill existing sessions }
+      - { id: "1.1", title: "Add refresh_tokens table" }
+      - { id: "1.2", title: "Backfill existing sessions" }
   - id: 2
-    title: Token rotation
+    title: "Token rotation"
     bookmark: auth-refresh/2-rotation
     done_when: all checks pass
     tasks:
-      - { id: "2.1", title: Rotate on use }
+      - { id: "2.1", title: "Rotate on use" }
 ---
 
 # Refresh token rotation
 
 Narrative, context, decisions, risks…
 ```
+
+`lr plan submit` and `lr plan revise` reject keys the frontmatter doesn't define, at any level, so a
+typo or an unquoted comma in a `{ … }` title fails instead of passing as a cut-short title. Stored
+versions are read back without the check, since a plan saved before it may have stray keys.
 
 ```ts
 interface PlanVersion {

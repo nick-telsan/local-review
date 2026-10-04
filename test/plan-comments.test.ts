@@ -70,7 +70,7 @@ test("comments on the plan's lines, checked against the round's plan", async () 
         kind: "plan",
         version: 1,
         lines: [8, 8],
-        snippet: ['      - { id: "1.2", title: Backfill }'],
+        snippet: ['      - { id: "1.2", title: "Backfill" }'],
       },
     },
     expect.objectContaining({ id: 3, anchor: expect.objectContaining({ lines: null }) }),
