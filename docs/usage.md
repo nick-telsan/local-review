@@ -38,6 +38,7 @@ lr review submit -F review.json --as agent:codex        # a reviewer agent's rev
 lr review submit --verdict approved -m "LGTM"            # a human verdict, without the UI
 lr handoff                         # what the author agent needs to act on, as markdown
 lr reply 12 --addressed "Added NOT NULL in kxqp"         # author
+lr reply 12 -F reply.md            # a longer reply, from a file (- for stdin)
 lr reply 12 --resolve              # reviewer (or --reopen, --dismiss, --accept)
 lr threads                         # unsettled threads (--notes: the author's notes)
 lr diff                            # what changed since your last review, change by change

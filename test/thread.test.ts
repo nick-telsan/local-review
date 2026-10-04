@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ReplyOk, ThreadsOk } from "../src/commands/thread.ts";
 import type { Handoff } from "../src/handoff.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
-import { lr, lrJson } from "./lr.ts";
+import { lr, lrJson, lrWithStdin } from "./lr.ts";
 
 let repo: TestRepo;
 let c1: string;
@@ -184,6 +184,35 @@ describe("lr reply", () => {
     const r = await lr(repo, "reply", String(ids[0]), "--reopen", ...NICK);
     expect(r.err).toContain(
       `#${ids[0]} is open; --reopen applies to addressed, resolved, or dismissed threads`,
+    );
+  });
+
+  test("the message can come from a file or stdin", async () => {
+    const [a, b] = ids as [number, number];
+    const text = 'Moved it to `lr ui`\'s "Yours" list.\n\nSee kxqp.\n';
+    const r = await lrWithStdin(
+      repo,
+      text,
+      "reply",
+      String(a),
+      "--addressed",
+      "-F",
+      "-",
+      ...AUTHOR,
+    );
+    expect(r.out).toBe(`#${a}: open → addressed`);
+    await Bun.write(join(repo.tmp, "reply.md"), "Why not?\n");
+    await lr(repo, "reply", String(b), "-F", join(repo.tmp, "reply.md"), ...AUTHOR);
+    const threads = (await lrJson<ThreadsOk>(repo, "threads", "--all")).data.threads;
+    expect(threads.map((t) => t.entries.at(-1)!.body)).toEqual([
+      'Moved it to `lr ui`\'s "Yours" list.\n\nSee kxqp.',
+      "Why not?",
+    ]);
+    expect((await lr(repo, "reply", String(b), "x", "-F", "-", ...AUTHOR)).err).toContain(
+      "give the message as an argument or with -F, not both",
+    );
+    expect((await lr(repo, "reply", String(b), "-F", "nope.md", ...AUTHOR)).err).toContain(
+      "no such file: nope.md",
     );
   });
 

@@ -129,6 +129,15 @@ failing checks, every open thread with its code or message snippet, and next ste
    - `lr reply <id> --addressed "<what changed, in which change>"` once it's fixed.
    - `lr reply <id> "<why not>"` to push back or ask a question. The thread stays open for the
      reviewer.
+
+   For a reply that's long, spans lines, or has quotes or backticks in it, pass it on stdin with
+   a quoted heredoc instead, so the shell leaves it alone:
+
+   ```sh
+   lr reply <id> --addressed -F - <<'EOF'
+   <what changed, in which change>
+   EOF
+   ```
 4. **Open the next round** with `lr review create`, and tell the developer what changed.
 
 A thread marked **outdated** points at code or a message that changed after the comment was made.

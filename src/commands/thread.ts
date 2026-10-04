@@ -35,7 +35,8 @@ export async function reply(
   const id = /^#?(\d+)$/.exec(idArg ?? "")?.[1];
   if (!id) {
     throw new LrError(
-      "usage: lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]",
+      "usage: lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] " +
+        "[<message> | -F <file>]",
     );
   }
   const feature = ctx.feature();
