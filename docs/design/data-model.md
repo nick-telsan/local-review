@@ -1,72 +1,9 @@
-# local-review: data model & handoff format
-
-Status: draft v1 — 2026-09-27
-
-Working CLI name in this doc: `lr`.
-
-## 1. Lifecycle
-
-```
-            ┌──────────────── revise (plan vN+1, amend changes) ◄───────────────┐
-            ▼                                                                   │
-plan ──► implement ──► lr review create ──► round N ──► reviews ──► handoff ────┤ changes requested
- (A)        (B)        (snapshot + checks)             (agent, human)           │
-                                                                                └─► approved
-                                                                                     │
-                     done ◄── lr final apply ◄── final review ◄── finalize (C) ◄─────┘
-                               (jj squash)       (messages, PR body)  (+ revise if comments)
-```
-
-- A **feature** is the unit of work: one plan, one stack of changes, many review rounds.
-- A **round** is an immutable snapshot of the stack taken by `lr review create`. Any number of
-  **reviews** (agent or human) attach to a round. Ordering between reviewers (agent first, parallel,
-  etc.) is a config policy, not part of the model.
-- **Threads** live on the feature, not the round, so they carry across rounds. They get re-anchored
-  onto each new snapshot.
-- A round's **verdict** comes from the human review: `changes_requested` → revise loop; `approved`
-  with open threads → revise, then finalize; `approved` with no open threads → finalize directly.
-
-## 2. Storage
-
-```
-~/.local-review/
-  config.toml                         # global defaults
-  <repo-key>/                         # <dirname>-<6-char hash of repo root path>
-    repo.json                         # { root, createdAt }
-    state.db                          # SQLite (WAL), one per repo: features, plans, rounds, reviews,
-                                      #   threads, checks
-    <feature>/
-      plan/v1.md, v2.md, …            # plan versions (human/agent-authored markdown)
-      rounds/<n>/patches/<change>.patch
-      checks/<run-id>.log             # check logs (runs are keyed by commit, not round)
-      final/messages/<group>.md       # final commit message drafts
-      final/pr.md                     # PR body draft
-      workspaces/checks/              # jj workspace `lr-<feature>-checks`, where checks run
-      workspaces/checks.lock          # held while a process runs checks there
-<repo>/.local-review.toml             # team-shareable: checks, bookmark naming, squash defaults
-```
-
-**Why one database per repo.** Listing features and cross-feature queries stay a single query.
-Feature directories only hold files.
-
-**Why SQLite for state.** The CLI (called by the implementing agent), a reviewing agent, and the
-desktop app can all write during the same round. SQLite transactions make that safe without
-inventing locking. Anything a person or agent writes as prose (plans, PR body) stays a plain file.
-Logs and patches stay plain files too.
-
-The repo key is a hash of the root path, so moving a repo breaks the link: lr finds no history at
-the new path. `lr repo relink [<old path>]`, run in the moved repo, repairs it (see CLI).
-
-**Why cache patches.** Each round records the jj operation id, so `jj --at-op` can reconstruct it.
-But `jj op abandon` / `jj util gc` can drop old commits, and patches are cheap insurance for
-interdiffs.
-
-## 3. Entities
+# Data model
 
 TypeScript notation for readability. On disk, these are SQLite rows, with JSON columns where the
 data is nested.
 
-### Actor
+## Actor
 
 ```ts
 interface Actor {
@@ -79,9 +16,9 @@ Who's acting comes from `--as`, then `$LR_ACTOR`. Without either, lr checks whet
 runs it (`$AI_AGENT`, or `CLAUDECODE=1` for Claude Code) and records that agent. Only outside any
 agent does it fall back to the OS user as a human. An agent that forgets `--as` can't record a
 human's verdict. The Claude Code plugin also asks the developer before an agent claims to be a
-human (see Claude Code integration).
+human (see [Claude Code integration](claude-code.md)).
 
-### Feature
+## Feature
 
 ```ts
 interface Feature {
@@ -110,7 +47,7 @@ root commit. With the default base it's an error that names the nearest such boo
 `--base`. A base given by name (even `--base 'trunk()'`) is taken as meant, with a warning. A
 default base that's the root commit with no bookmarks in the way (a new repo) only warns.
 
-### Plan
+## Plan
 
 The plan is markdown with YAML frontmatter. The frontmatter holds the parts the tool needs to
 understand: phases, their bookmarks, and tasks. The body is freeform.
@@ -142,7 +79,7 @@ Narrative, context, decisions, risks…
 interface PlanVersion {
   version: number;
   path: string; // plan/v2.md
-  respondsToRound?: number; // set for A', A'', …
+  respondsToRound: number | null; // the round a revised plan answers; null for the first
   createdBy: Actor;
   createdAt: string;
 }
@@ -150,19 +87,18 @@ interface PlanVersion {
 
 Commits link to tasks through a jj trailer in the description: `Plan-Task: 1.1`. A change can name
 several (`Plan-Task: 1.1, 1.2`, or one trailer each; the key is matched without case). This is
-optional; the UI uses it to show plan-vs-implementation coverage (see Web UI). Once any change in a
+optional; the UI uses it to show plan-vs-implementation coverage (see [Web UI](web-ui.md)). Once any change in a
 code round names a task, `lr review create` (as warnings; they never block a round), `lr status`,
 and `lr handoff` list the **plan gaps**: tasks no change names,
 task ids the plan doesn't have, and changes that name no task. Until then there's nothing to
-measure, so they say nothing. Final rounds skip it, since their code is already approved. (Verified: `jj log -T trailers` works on
-jj 0.45.)
+measure, so they say nothing. Final rounds skip it, since their code is already approved.
 
-### Round (snapshot)
+## Round (snapshot)
 
 ```ts
 interface Round {
   n: number;
-  kind: "code" | "final"; // a final round reviews the squash groups and messages (see Finalization)
+  kind: "code" | "final"; // a final round reviews the squash groups and messages (see [Finalization](finalization.md))
   jjOpId: string; // operation id at snapshot time
   planVersion: number;
   base: { commitId: string };
@@ -191,7 +127,7 @@ interface ChangeSnapshot {
 
 A change's phase is the first phase bookmark at or after it in stack order.
 
-### Rebase
+## Rebase
 
 Change ids survive a rebase, so anchors, phase membership, and squash groups are unaffected. What
 changes is every commit id, and with them the trees:
@@ -228,86 +164,7 @@ then on, e.g. to move a stacked feature onto trunk once the feature below it lan
 never automatic. The author does it when the developer asks, or when the stack needs something that
 landed on the base.
 
-### Checks
-
-Defined in `<repo>/.local-review.toml`:
-
-```toml
-setup = "bun install --frozen-lockfile"   # optional; runs once per commit before its checks
-setup_kill_after = "30s"                  # default 30s; like kill_after, for setup
-
-[[checks]]
-name = "test"
-run = "bun test"
-at = "bookmarks"        # "tip" (default) | "bookmarks" | "changes"
-timeout = "10m"         # default 10m
-kill_after = "30s"      # default 30s: time to shut down after SIGTERM, before SIGKILL
-```
-
-```ts
-interface CheckRun {
-  id: string;
-  check: string;
-  command: string; // part of the cache key: editing a check's command invalidates old passes
-  changeId: string;
-  commitId: string; // stale if ≠ the change's commit in the latest round
-  trigger: "auto" | "manual"; // manual = someone ran it with `lr check`
-  status: "pending" | "running" | "pass" | "fail" | "error" | "skipped";
-  exitCode?: number;
-  logPath: string;
-  startedAt?: string;
-  finishedAt?: string;
-}
-```
-
-Check runs belong to a commit, not a round. A `round_checks` table links each round to the runs it
-used. Before running a check, `lr review create` looks for an earlier passing run with the same
-check, command and commit id, and reuses it. So when an agent fixes one failing phase, only the
-commits that changed get re-checked.
-
-Every check runs in the feature's jj workspace (`workspaces/checks`), including checks at the tip,
-so the developer's working copy is never touched. Before each commit the workspace is restored,
-which discards anything a previous check wrote. That keeps the workspace commit empty. It's one
-change for the workspace's life, described as lr's (`lr: where local-review runs checks for …`)
-and moved with `jj rebase -r @`, so in `jj log` it doesn't read as a stray change of the
-developer's. jj abandons an empty working-copy commit on `workspace forget` only when it has no
-description, so lr abandons it first. Checks get `LR_CHECK`, `LR_CHANGE_ID` and `LR_COMMIT_ID`
-in their environment.
-
-If a check fails, or a change is conflicted (conflicts propagate to descendants), no round is
-opened. The runs are still recorded, so their logs are available for the fix.
-
-One process runs checks in a feature's workspace at a time, since two would check out over each
-other. While one does, it holds `workspaces/checks.lock` (created exclusively, with its pid). A
-second run says whose turn it is and waits, then looks at the cache again, so it reuses what the
-first run passed. A lock whose process is gone (killed, or crashed) is taken over. Runs served
-entirely from the cache don't need the workspace, and don't wait.
-
-`lr check` runs checks by hand. By default it checks the stack as it is now (even before the phase
-bookmarks exist), with the same targets `lr review create` would use, so an author can confirm a
-fix first. Passing runs are cached the same way, so the next round reuses them. With `--round <n>`,
-it checks that round's commits instead, and adds the runs to the round. A round shows the latest run
-of each check on each change, so a reviewer who reruns a flaky failure (`--rerun` skips the cache)
-replaces it in `lr status` and the handoff. Named changes get every check (or the ones `--check`
-picks), whatever their `at`. It exits 1 if any check doesn't pass.
-
-Each check (and setup) runs in its own process group, so stopping it stops everything it started,
-not just the shell. A check past its timeout gets SIGTERM, then SIGKILL after `kill_after`; the run
-is an `error`. Anything a check leaves running after it exits (a background server, say) is stopped
-the same way, without changing its result, so nothing touches the workspace after lr moves on. If
-it doesn't exit within half a second, lr says it's waiting and for how long.
-
-The 30-second default is for test suites that tear down databases or containers. Those usually
-belong to the Docker daemon, not the check's process group, so only the suite's own teardown can
-stop them, and a SIGKILL mid-teardown leaves them running. Set `kill_after` higher for suites that
-need longer; waiting forever isn't an option, since a hung teardown would hang the round.
-
-The group isn't in the terminal's foreground group, so lr passes SIGINT, SIGTERM and SIGHUP on to
-the running check. A second one, or one while lr is waiting for a check to stop, kills it. The run
-is recorded as an `error`, no round is opened, and lr exits as an interrupted shell would (130 for
-Ctrl-C).
-
-### Review
+## Review
 
 ```ts
 interface Review {
@@ -336,10 +193,10 @@ validation and recording. Nobody else sees a draft: not the handoff, `lr threads
 A draft on a round that's superseded before it's submitted can only be discarded; its comments
 aren't carried to the new round.
 
-### Thread
+## Thread
 
-A thread is used for review comments and also for **author notes** (the replacement for inline
-`TEMPORAL` comments).
+A thread is used for review comments and also for **author notes**, which stand in for explanatory
+comments in the code.
 
 ```ts
 interface Thread {
@@ -349,7 +206,7 @@ interface Thread {
   anchorRound: number | null; // the round whose snapshot `anchor` refers to; null for a new note
   anchorStack: { baseCommitId: string; changes: { changeId: string; commitId: string }[] } | null;
   // ^ for a note no round has picked up yet: the stack `anchor` refers to
-  anchorState: "current" | "moved" | "outdated"; // relative to originalAnchor; see Re-anchoring
+  anchorState: "current" | "moved" | "outdated"; // relative to originalAnchor; see [Re-anchoring](#re-anchoring)
   originalAnchor: Anchor; // where the comment was made; never changes
   severity?: "blocking" | "suggestion" | "nit" | "question";
   status: "proposed" | "open" | "addressed" | "resolved" | "dismissed";
@@ -370,7 +227,7 @@ interface Entry {
 }
 ```
 
-**Status transitions**
+### Status transitions
 
 ```
 proposed ──(human accepts)──► open ──(fixer: --addressed)──► addressed ──(reviewer)──► resolved
@@ -397,7 +254,7 @@ All of these go through `lr reply <thread> [<action>] [<message>]`:
 `lr threads` lists unsettled threads (`proposed`, `open`, `addressed`), or `--status a,b` or `--all`.
 `--notes` lists notes only, in any status unless `--status` narrows it.
 
-**Notes**
+### Notes
 
 A note is the author annotating their own diff for reviewers, in place of an explanatory comment in
 the code. Notes can't leak into the PR, and there's nothing to clean up at finalization.
@@ -413,14 +270,14 @@ lr note <change> <path>:<line>[-<line>] [--old] "<text>"   # on lines of the dif
 - A note is written against the stack as it is now, not a round's snapshot, since it's usually
   written while a phase is still in progress. Before any phase bookmark exists, the stack runs from
   the base up to `@`. The location is checked like a review comment's. The note records the stack's
-  change and commit ids (`anchorStack`), and the next round places it from there (see Re-anchoring).
+  change and commit ids (`anchorStack`), and the next round places it from there (see [Re-anchoring](#re-anchoring)).
 - Notes start `resolved`, so they don't count as open work.
 - A reply from anyone other than the note's author reopens it as `open`, since it's a question or
   comment for the author. From then on it's like a review comment: it shows up in the handoff, and
   whoever reopened it (or a human) resolves it. Anyone but the author can also `--reopen` a note
   explicitly. The author's own replies leave it alone.
 
-### Anchor
+## Anchor
 
 ```ts
 type RevRef = { changeId: string } | "base";
@@ -461,7 +318,7 @@ lines no change in the view touched, it falls back to `view.to`'s change.
 anchors point into the plan file (frontmatter included, so line numbers match the file) of the
 version the round was taken against.
 
-**Re-anchoring**
+### Re-anchoring
 
 `lr review create` carries every unsettled thread (`proposed`, `open`, `addressed`) from its
 `anchorRound` onto the new round. Resolved and dismissed threads stay where they were. If one is
@@ -508,7 +365,7 @@ next to the code. A note that no round has placed yet is mapped from its `anchor
 a round's snapshot. If it goes outdated there, it keeps `anchorRound` null and tries again from the
 same stack next time.
 
-### Review submissions
+## Review submissions
 
 `lr review submit -F <review.json>` (or `-F -` for stdin) records a whole review at once. This is the
 path agents use. `--verdict` and `-m <body>` can stand in for the file, or override its fields.
@@ -558,388 +415,3 @@ Nothing is recorded unless every comment resolves. The review goes on the latest
 the current one. Each comment becomes a thread (numbered per feature) whose first entry is the
 comment. Agent comments start `proposed` when `[review] triage_agent_comments = true` is set in
 `.local-review.toml`, and `open` otherwise.
-
-### Finalization
-
-After a human approves a code round with nothing left open, the feature is `finalizing`:
-
-```
-finalizing ──lr review create --final──► final_review ──human approves──► approved ──lr final apply──► done
-    ▲                                         │
-    └──────────── changes requested ──────────┘
-```
-
-**Squash groups.** The approved round's changes are grouped into the commits of the finished
-feature. There's one group per phase by default, named by phase id (`1`, `2`). `lr final cut <change>`
-starts a new group at a change, splitting its phase (`2a`, `2b`). Only the developer should do that.
-Moving changes between phases and reordering are out of scope. Every change must be in a phase.
-
-**Drafts.** Each group's message and the PR body are plain files in the feature directory
-(`final/messages/<group>.md`, `final/pr.md`). They're written with `lr final message <group> -F` and
-`lr final pr-body -F`, or edited directly by the developer. `lr final show` lists the groups with
-their changes and drafts. Its `--json` includes the commit guidelines and PR template from
-`[final]` in `.local-review.toml` (`commit_guidelines`, and `pr_template`, which defaults to
-`.github/pull_request_template.md`). A cut clears the drafted messages of its phase, since their
-group ids change.
-
-**Final rounds.** `lr review create --final` opens a round of kind `final`. It carries the stack and
-freezes the drafts:
-
-```ts
-interface FinalSnapshot {
-  approvedRound: number; // the code round a human approved
-  groups: { id: string; phaseId: number; changeIds: string[]; message: string }[];
-  prBody: string;
-}
-```
-
-It's refused unless:
-- the stack has the code the human approved (a clean rebase is fine; see Rebase);
-- every group has a message and there's a PR body;
-- no thread is `open` or `proposed`.
-
-It reuses the approved round's checks, or reruns them if the stack was rebased. Reviewers comment on the messages and the PR body with
-`final` and `pr_body` locations (see Review submissions). Code comments still work. Anything that
-needs a code change goes back through a code round (`lr review create`). Threads on messages and the
-PR body stay put during code rounds, and get re-anchored at the next final round.
-
-**What's applied is what a human approved.** A human can't approve a final round if the drafts have
-changed since it opened. `lr final apply` refuses if they've changed since the approval, if a thread
-is open, or if the code changed. After a clean rebase, it reruns the checks first.
-
-**`lr final apply`:**
-1. Records the jj operation as the undo point.
-2. Squashes each group into its last change with its message. The last change keeps its change id
-   and the phase's bookmark.
-3. Checks that the new top of the stack has exactly the tree of the old top.
-4. On any failure, it runs `jj op restore` back to the undo point and reports the error. On success,
-   it records the apply (`final_applies`) and marks the feature `done`.
-
-Bookmarks are kept. Pushing and opening the PR are left to the developer, or to an agent they ask.
-
-## 4. Handoff format
-
-`lr handoff [--round N] [--json]`. Markdown is the default because agents read it best. `--json` returns
-the same content as structured data. It's read-only, so the agent can re-read it whenever it wants.
-
-**When there's something to hand off.** Only a human approves. A human's verdict on the round is
-the verdict. Without one, the handoff is "changes requested (by agent reviewers)" if an agent asked
-for changes or left open threads. That's the agent-reviews-first loop. Otherwise there's nothing to
-hand off yet (no reviews, or agents approved and a human hasn't weighed in), and `lr handoff` exits
-1 with the reason. `lr status` points at the handoff once it's ready. A human's verdict also moves
-the feature to `revising` or `finalizing`.
-
-Rules:
-
-- Include every `open` thread on the feature, from any round (reopened ones included), with the
-  context needed to act on them. They're shown where they were re-anchored to in the latest round.
-  Outdated threads are marked, with the snippet as it was. `addressed` (waiting on the reviewer),
-  `resolved`, `dismissed` and `proposed` threads are left out. That includes notes, unless
-  someone reopened one.
-- Group by where the fix goes: general → final commits → PR body → the plan → phase → change →
-  file. The agent works change by change
-  (`jj edit` / `jj squash --into`), so that's the useful order.
-- Inline the code snippet and the full thread, so the agent doesn't need extra lookups to
-  understand a comment.
-- After the threads, list the round's plan gaps (see Plan), with a next step to close them.
-- Always end with explicit next-step instructions that match the verdict.
-
-Example (changes requested), exactly as rendered:
-
-````md
-# Review handoff: auth-refresh, round 2
-
-**Verdict:** changes requested  
-**Reviews:** agent:codex: approved · human:nick: changes requested  
-**Checks:** ✗ test @ `vtzqlmsr` (fail): log at ~/.local-review/…/checks/0199….log  
-**Plan:** v1 · 3 open thread(s) (2 blocking)
-
-## Reviewer summary (human:nick)
-
-> Schema looks right. Rotation has a race; see #14.
-
-## General
-
-### #9 · blocking
-
-> **human:nick**: Rotation should be feature-flagged.
-
-## Phase 1: Schema + migration (`auth-refresh/1-schema`)
-
-### Change `kxqpmwyz` "Adds refresh_tokens table"
-
-#### #13 · nit · commit message, line 1
-
-```
-Adds refresh_tokens table
-```
-
-> **human:nick**: Subject should be imperative: "Add…", not "Adds…".
-
-#### #12 · blocking · `src/db/schema.ts:40-41` (new)
-
-```ts
-40 |   expires_at: timestamp(),
-41 |   revoked: boolean(),
-```
-
-> **human:nick**: Both need `.notNull()`.
->
-> Suggested:
->
-> ```ts
-> expires_at: timestamp().notNull(),
-> revoked: boolean().notNull().default(false),
-> ```
->
-> **agent:claude-code** (marked addressed): Added in kxqpmwyz.
->
-> **human:nick** (marked open): `revoked` still allows null.
-
-## Next steps
-
-1. Fix the failing checks listed above.
-2. Write a revised plan that covers every open thread above, and says why for any you won't change: `lr plan revise -F <file>`.
-3. Amend the changes the threads are on, in place (`jj edit <change>`, or `jj squash --into <change>`). Don't stack fixup commits unless the plan says to.
-4. Reply to every thread: `lr reply <id> --addressed "<what changed>"`, or `lr reply <id> "<why not>"` to push back.
-5. Run `lr review create` to open the next round.
-````
-
-When the verdict is `approved` and threads are open, the steps are the same, except that the last
-one is a final `lr review create` "for a last look". Approved with nothing open means finalize: draft
-one message per group (`lr final message <group> -F`) and the PR body (`lr final pr-body -F`),
-then run `lr review create --final`. A final round's handoff is titled "final round N". It groups
-threads under "Final commit messages" and "PR body". Its steps are to redraft, reply, and open the
-next final round, or to run `lr final apply` once approved.
-
-## 5. Agent-facing CLI surface (sketch)
-
-These are the only write paths into the model, so it's worth listing them now:
-
-| Command                                                                  | Who            | Effect                                                                        |
-| ------------------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------- |
-| `lr init`                                                                | developer      | write a commented `.local-review.toml`                                        |
-| `lr feature start <slug> [--base <revset>]`                              | author agent   | create feature (see Feature for the base checks)                              |
-| `lr plan submit\|revise -F <file>`                                       | author agent   | new plan version (validates frontmatter)                                      |
-| `lr note <change> [<path>:<a>[-<b>] [--old]] "<text>"`                   | author agent   | a note for reviewers on your own change (see Notes)                           |
-| `lr review create [--allow-failing] [--skip-checks]`                     | author agent   | snapshot + checks, then re-anchor threads; if a check fails, it exits non-zero and no round is opened |
-| `lr check [<change>…] [--check <name,…>] [--round <n>] [--rerun]`       | anyone         | run checks by hand, on the stack now or a round's commits (see Checks)       |
-| `lr review create --final`                                               | author agent   | a final round (see Finalization)                                              |
-| `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see Review submissions)                   |
-| `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
-| `lr diff [<change>] [--from <n>] [--to <n>] [--name-only]`              | anyone         | what changed between rounds, change by change (see below)                     |
-| `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see Thread)                                    |
-| `lr threads [--status <s,…>\|--all] [--notes]`                           | anyone         | list threads, or notes                                                        |
-| `lr final show` · `lr final message <group> -F` · `lr final pr-body -F`  | author agent   | draft the final commits (see Finalization)                                    |
-| `lr final cut <change> [--remove]`                                       | developer      | split a phase into more than one final commit                                 |
-| `lr final apply`                                                         | anyone         | squash the stack as approved                                                  |
-| `lr status [--json]`                                                     | anyone         | feature state + what's expected next                                          |
-| `lr rebase [--onto <revset>]`                                            | anyone         | rebase the stack onto its base (`--onto`: a new base); see Rebase             |
-| `lr hook session-start\|pre-tool-use\|stop`                              | Claude Code    | hook handlers; see Claude Code integration                                    |
-| `lr feature abandon [<slug>]`                                            | human          | give up on a feature (history and commits are kept)                           |
-| `lr feature clean [<slug>…] [--purge]`                                   | anyone; `--purge`: human | tidy up after finished features (see below)                         |
-| `lr repo relink [<old path>]`                                            | developer      | bring review history along after the repo moves (see below)                   |
-| `lr ui [--port <n>] [--no-open]`                                         | developer      | the review UI in the browser (see Web UI)                                     |
-
-`lr feature clean` tidies up after done and abandoned features: the ones named, or all of them. It
-refuses a feature that's still active.
-
-- **Phase bookmarks** (from the current plan, and the plan of the last round) are forgotten if
-  they're still on the change where the last round saw them. That includes after `lr final apply`,
-  since squashing keeps each group's last change id. A bookmark that moved, is conflicted, or that
-  no round ever recorded is kept, with the reason. Forgetting (`jj bookmark forget`) never touches
-  a remote: remote bookmarks they tracked become untracked. Deleting the pushed branch is left to
-  the developer or the forge.
-- **The checks workspace** is forgotten, and its directory removed.
-- **Commits are never touched.**
-- **Review history is kept** (plans, rounds, threads, drafts, check logs) unless `--purge`, which
-  deletes the feature's state and directory. `--purge` needs a human and named features, because
-  there's no undo.
-
-It prints the jj operation to restore to undo the bookmark and workspace changes.
-
-`lr diff` compares two rounds change by change: by default the latest round against the last one
-the actor reviewed, or else the one before it. Each change is `added`, `removed` (abandoned, or
-squashed into the change named), `changed`, or `unchanged`. A changed change's patch is
-`jj interdiff --git` between its two commits, so a rebase alone changes nothing, and a message edit
-shows as a `JJ-COMMIT-DESCRIPTION` file. A change that moved phases, or is conflicted, counts as
-changed. If the earlier commit is gone (`jj util gc`), it shows the whole change and says so.
-
-`lr repo relink` moves a repo's review history to where the repo is now. Without a path, it looks
-for history whose repo is gone and whose latest rounds recorded commits this repo has; it relinks
-the one match, and otherwise asks for the old path. Given a path, it refuses one that's still a jj
-repo (a copy isn't a move), or whose rounds recorded none of this repo's commits. It renames the
-key directory, points `repo.json` and the check log paths at the new place, and replaces the empty
-state that any lr command run here before relinking left behind. It won't merge two histories.
-Checks workspaces find their repo by a relative path, which the move broke, so relink forgets them
-and removes their directories; the next check run makes new ones. Until the repo is relinked,
-commands that find no features here say so when history for a gone repo of the same name exists.
-
-### Claude Code integration
-
-`plugin/` is a Claude Code plugin, listed by the marketplace at the repo root. It has two skills,
-`lr-author` and `lr-review`, and three hooks. The skills and hooks also work installed on their own
-(skills in `~/.claude/skills/`, hooks in `settings.json`), so each hook is a plain shell command
-that calls `lr hook <event>` and does nothing if `lr` isn't on `PATH`. The logic lives in lr, where
-it's tested.
-
-- **SessionStart:** if the repo has lr state and one active feature, it prints the feature's status
-  and next step, which becomes session context. It also records the stack as the session found it.
-  Resume and compaction keep the same record.
-- **PreToolUse (Bash):** if a command runs lr as a human (`--as human:…`, `--as <name>`,
-  `LR_ACTOR=<human>`, or `lr ui`, which acts as the OS user), it returns `ask` so the developer
-  confirms.
-- **Stop:** if the feature is `implementing` or `revising`, and the stack differs from both how the
-  session found it and the latest round, it blocks the stop once (exit 2) with a reminder: open a
-  round with `lr review create`, or say what's left. It fires once per stack state, and never while
-  `stop_hook_active`. The plugin's `stop_reminder` option turns it off.
-
-Session records live in `<repo-key>/sessions/<session id>.json`.
-
-### Web UI
-
-`lr ui` serves a React app and a JSON API on 127.0.0.1 and opens the browser (`$BROWSER`, else the
-platform's opener) at the current feature's latest round. The port is `--port`, else `[ui] port` in
-`.local-review.toml`, else one derived from the repo's path (47000–47999), so it's the same after a
-restart and links and open tabs keep working. If something else holds that derived port, `lr ui`
-takes any free one and says so; a port set with `--port` or the config must be free. It runs until Ctrl-C. One per repo: it records its pid, port, and token in
-`<repo-key>/ui.json` (mode 0600), and a second `lr ui` opens that one instead of starting another.
-While one runs, other commands link to the round they're about: `lr review create` (code and final),
-`lr status`, `lr handoff`, and the session-start hook print its page's address, and their JSON has
-it as `uiUrl` (null when no UI is running). These links leave out the token, since CLI output lands
-in transcripts and handoffs; the browser `lr ui` opened already holds it.
-The standalone binary embeds the page; from source, Bun bundles `src/web/index.html` at startup.
-
-It acts as a person: `--as` or `$LR_ACTOR` if either names a human, else the OS user, never the
-coding agent whose shell started it. It writes through the same code as the CLI: drafts become
-reviews via `lr review submit`'s path, and replies go through `lr reply`'s rules.
-
-**Security.** The API reads and writes reviews, so any page open in the browser must
-not reach it. The page itself is public, since it's the same bundle for everyone. The API needs a
-random token, sent as `Authorization: Bearer`. The link `lr ui` prints carries it as `?t=`; the page
-keeps it in `localStorage` (per port) and takes it out of the address bar. A restarted `lr ui` has a
-new token; the tab it opens stores it, and pages still open from before pick it up (the `storage`
-event), reconnect, and refetch. Only the event stream
-accepts it in the URL, since `EventSource` can't send headers. The server also refuses a `Host` other
-than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding), and non-GET requests from another
-`Origin`.
-
-**Keyboard.** On a round's pages (`?` lists them): `j`/`k` step through the sidebar (overview,
-plan, each change); `n`/`p` select the next or previous unresolved thread, going on to the next page
-with one; `r` replies to the selected thread; `]`/`[` move between the diff's files; `c` opens the
-page's main comment (the change, the plan, or the feature on the overview); `s` switches between
-the whole round and "since your last review"; `f` opens Finish review. They act on what's rendered,
-so they need no state of their own. Commenting on lines is still by mouse.
-
-**Live updates.** The CLI and agents write to the same SQLite database from other processes. While a
-page is connected, the server checks `PRAGMA data_version` every 500ms, and sends `changed` on a
-server-sent event stream when it moves. The page then refetches what it shows.
-
-**API** (types in `src/ui/api.ts`):
-
-- `GET /api/features`: the features, each with its latest round and unsettled thread count.
-- `GET /api/features/:slug/rounds/:n` (`n` may be `latest`): the round, its plan's phases, checks,
-  reviews, and threads, each with a `placement`.
-- `GET /api/features/:slug/rounds/:n/changes/:change`: the change's diff, parsed into files, hunks,
-  and lines, from the round's cached patch (or jj, if the cache is gone).
-- `GET /api/features/:slug/rounds/:n/plan`: every plan version with its text, which one the round
-  was taken against, and the round's coverage of it: each task with the changes naming it, each
-  phase's changes naming no task, task ids the plan doesn't have, and changes in no phase.
-- `GET /api/features/:slug/rounds/:n/since/:from`: what changed since an earlier round, change by
-  change, as `lr diff` compares them. A changed change's interdiff is parsed into files, and a
-  message edit is split out of them. Rounds are snapshots, so the server keeps recent comparisons.
-- `POST …/rounds/:n/draft/comments`, `PUT`/`DELETE …/draft/comments/:id`: the actor's draft comments,
-  in review-file form (`change`, `path`, `lines`, `side`, `message`, `final`, `pr_body`, `plan`,
-  `severity`, `body`, `suggestion`).
-- `PUT …/rounds/:n/draft` (verdict and summary, saved as they're written), `DELETE …/draft`
-  (discard), `POST …/draft/submit` (record it as a review).
-- `POST /api/features/:slug/threads/:id/replies` (`action`, `body`): like `lr reply`. The round view
-  lists each thread's `actions`: what the actor may do to it now.
-
-Writes push `changed` to other open pages too, since the server's own writes don't move
-`data_version` for its own connection.
-
-**Commenting.** Lines are picked the same way in a diff and in a text (a commit message, a final
-commit's message, the PR body): click a line number, drag across several, or shift-click to
-extend. The form follows the last picked line and keeps what's written; a suggestion that wasn't
-edited follows the pick. A final round shows each final commit's message and the PR body line by
-line, so they take comments like a change's message does.
-
-**The plan.** A round's plan page shows the plan version it was taken against, phase by phase:
-each task with the changes whose `Plan-Task` names it (or none), the phase's changes that name no
-task, and below, anything outside the plan. Phase comments go there, and so do plan comments: the
-plan file shows as numbered lines while the round takes comments, with a rendered preview. The body is rendered as
-GitHub-flavored markdown (tables, task lists, strikethrough) by `react-markdown`, which builds React
-elements: raw HTML shows as text, unsafe link schemes are dropped, and images become links, so
-nothing is fetched until someone clicks. Other versions can be read,
-each with a line diff from the one before, but only the round's version shows coverage or takes
-comments, since those are on the round's phases.
-
-**Markdown.** Comments, replies, review summaries, and the PR body's preview render as markdown
-like the plan, with each newline a line break, as GitHub treats comments and PR descriptions. The
-PR body shows as numbered lines while its round takes comments (they go on lines), and rendered
-otherwise; a toggle switches. Suggestions and commit messages stay plain text.
-
-**Since an earlier round.** A round can show only what changed since an earlier one: by default
-the last round the actor reviewed (the round view's `lastReviewed`), else the one before. It's
-`?since=<n>` in the address, and off unless asked for. The sidebar marks each change changed, new,
-or the same, with a changed change's stats taken from its interdiff, and lists the changes removed
-since. A changed change shows its interdiff and its message edit; a new one, and one whose earlier
-commit is gone, show their whole diff. An interdiff's new side is the change's own new side, so
-comments go on its new lines exactly as on the whole diff. Its old side is the earlier commit,
-rebased, so it takes no comments, and old-side comments aren't placed on it. A comment on lines an
-interdiff doesn't show is listed above its file; one on a file it doesn't show, with the change.
-
-**Which threads a round shows, and where.** The latest round shows the threads placed in it, every
-unsettled one, and any with activity in it. Outdated threads stay anchored in the round where they
-were last found, so these can point into an earlier round. An earlier round shows the threads made
-in it, where they were made; where they were carried later isn't recorded. A code comment goes
-inline only in the diff it was made in: the change's own diff. Comments made in a phase's or the
-stack's combined diff have that diff's line numbers, and outdated ones point at code that has
-changed, so both are listed with their change, with their snippet. A thread whose change has left
-the stack is listed on the round's overview.
-
-## 6. Decisions log
-
-- **jj only.** Colocated git repos should work, but only through jj.
-- **Bookmarks after `final apply`:** kept, for pushing. `lr feature clean` forgets them later,
-  locally only: lr never deletes anything on a remote.
-- **Abandoning is a human's call** (`lr feature abandon`), like approving.
-- **Rebases leave no trace in lr's state.** `lr rebase` is a convenience over `jj rebase`, and lr
-  treats both the same way. There's no rebase record: the undo point is in jj's operation log. A
-  rebase doesn't supersede an open round, since the round's snapshot is still what its reviewers
-  are reading.
-- **An approval covers each change's own diff, not its commit id,** so a clean rebase keeps it. The
-  checks run again on the rebased commits before anything is finalized.
-- **Checks run in their own process group**, so a timeout can stop what a check started, not only
-  its shell. The cost is that lr has to pass Ctrl-C on itself.
-- **Repo moves:** `lr repo relink`, rather than a repo id stored in the repo. lr keeps nothing in
-  the working copy, and matching on recorded commits finds the history without one.
-- **Notes are anchored to the live stack,** because they're written mid-phase, before any round.
-  They're re-anchored at every `lr review create`, resolved or not.
-- **Replying to a note reopens it** (unless you wrote it). A question is the common case, and one
-  that silently went nowhere would be worse than resolving a "thanks".
-- **Final rounds, not a separate artifact:** the final review is a round of kind `final`, so reviews,
-  threads, re-anchoring, and the handoff all work unchanged.
-- **Drafts are files; approvals are snapshots.** The developer can edit drafts in their editor, and
-  lr guarantees that what's applied is exactly what a human approved. It refuses an approval or an
-  apply if the drafts drifted.
-- **Squash into the last change:** it keeps the phase bookmark and change id, and jj verifies the
-  tree is unchanged.
-- **Agent by default inside agents:** lr defaults to the detected coding agent's identity rather
-  than the OS user. Your own `!` commands inside Claude Code therefore need `--as <you>`.
-- **The Stop reminder only fires for changes made in the session:** a session that didn't touch the
-  stack isn't asked about it.
-- **The UI is a local web app, served by lr, not a desktop app.** All of lr is TypeScript on Bun, so a
-  desktop shell (Electron, Tauri) would still run lr as a sidecar, and add signing, packaging, and
-  updates. The browser gives deep links and tabs for free. The page is part of lr's source
-  (`src/web/`), built into the same binary.
-- **The UI's diff view is our own,** not a library's: lr's model (a stack of changes, threads that
-  move between rounds, comments on messages) doesn't fit general-purpose diff components.
-- **Re-anchoring state is relative to where the comment was made,** not the previous round, so
-  "moved" always means "not where you left it". Outdated threads keep trying from their last good
-  round rather than being dropped.
-
-## 7. Open questions
-
-_None yet._
