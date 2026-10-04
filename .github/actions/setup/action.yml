@@ -1,0 +1,33 @@
+name: Set up Bun and jj
+description: Bun from .tool-versions, and jj from its release, checked against a pinned checksum.
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version-file: .tool-versions
+    - name: Install jj
+      shell: bash
+      env:
+        JJ_VERSION: 0.45.1
+      run: |
+        # Checksums from the release's asset digests.
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) target=x86_64-unknown-linux-musl sha=f35438350b5d61963aac5dd74ede510b31d6b9690769d1a6268cf058cc825f72 ;;
+          Linux-ARM64) target=aarch64-unknown-linux-musl sha=7349a43dd5a20dbc998b10114daa0ee63d2ab863fb822c7eb6b0ebca5903cc69 ;;
+          macOS-ARM64) target=aarch64-apple-darwin sha=51ba42e3d0682616f6eb015045bfe45289b396f03511f9897f645ce8e9272743 ;;
+          macOS-X64) target=x86_64-apple-darwin sha=6171582d0b5a98a1005cd9643faebff7936812ec264d7968a39d9cef3654a99b ;;
+          *) echo "no jj build for $RUNNER_OS-$RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+        archive="jj-v${JJ_VERSION}-${target}.tar.gz"
+        cd "$RUNNER_TEMP"
+        curl -fsSLO "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/${archive}"
+        echo "${sha}  ${archive}" | shasum -a 256 --check
+        mkdir -p "$RUNNER_TEMP/bin"
+        tar -xzf "$archive" -C "$RUNNER_TEMP/bin" ./jj
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/bin/jj" --version
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile

@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import pkg from "../package.json" with { type: "json" };
 import { resolveHuman } from "./actor.ts";
 import { check } from "./commands/check.ts";
 import { diff } from "./commands/diff.ts";
@@ -25,6 +26,11 @@ import { type ReplyAction, reply, threads } from "./commands/thread.ts";
 import { ui } from "./commands/ui.ts";
 import { Context, type Io } from "./context.ts";
 import { LrError } from "./errors.ts";
+
+/** `lr --version --json` output. */
+export interface VersionOk {
+  version: string;
+}
 
 const USAGE = `lr — local review for agentic development
 
@@ -65,6 +71,7 @@ Usage:
   lr repo relink [<old path>]    bring review history along after the repo moved
   lr hook ${HOOK_EVENTS.join("|")}
                                   Claude Code hook handlers (hook JSON on stdin)
+  lr --version
 
 Global options:
   -R, --repo <path>     repository (default: current directory)
@@ -263,6 +270,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
       const { values, positionals } = parse(argv.slice(1), {});
       return hook(positionals[0], io, values.repo);
     });
+  }
+
+  if (argv[0] === "--version") {
+    const json: VersionOk = { version: pkg.version };
+    io.out(argv.includes("--json") ? JSON.stringify(json, null, 2) : `lr ${json.version}`);
+    return 0;
   }
 
   // The command comes first: `lr <group> <verb> [options]` or `lr <verb> [options]`.
