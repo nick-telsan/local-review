@@ -1,6 +1,6 @@
 {
   "name": "local-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Skills and hooks for local-review (lr): plan, implement, review, and revise jj stacks with agent and human reviewers. Needs the lr CLI on your PATH: brew install nick-telsan/tap/local-review.",
   "author": { "name": "Nick Telsan" },
   "license": "Unlicense",
