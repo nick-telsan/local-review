@@ -224,4 +224,4 @@ claude --plugin-dir plugin       # try the plugin without installing it
 
 ## License
 
-[Unlicense](LICENSE): public domain.
+[Unlicense](UNLICENSE): public domain.
