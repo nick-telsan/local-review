@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { main } from "../src/cli.ts";
+import pkg from "../package.json" with { type: "json" };
+import { main, type VersionOk } from "../src/cli.ts";
 import type { FeatureStartOk } from "../src/commands/feature.ts";
 import type { PlanVersion } from "../src/model.ts";
 import { TestRepo, TWO_PHASE_PLAN } from "./helpers.ts";
@@ -37,6 +38,12 @@ describe("argument handling", () => {
       expect(r.code).toBe(0);
       expect(r.out).toContain("Usage:");
     }
+  });
+
+  test("--version prints the package's version, anywhere", async () => {
+    expect(await run("--version")).toEqual({ code: 0, out: `lr ${pkg.version}`, err: "" });
+    const r = await run("--version", "--json");
+    expect(JSON.parse(r.out)).toEqual({ version: pkg.version } satisfies VersionOk);
   });
 
   test("unknown commands exit 2", async () => {

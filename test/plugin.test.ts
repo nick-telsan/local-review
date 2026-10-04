@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { Glob } from "bun";
+import pkg from "../package.json" with { type: "json" };
 import { COMMAND_NAMES } from "../src/cli.ts";
 import { HOOK_EVENTS } from "../src/commands/hook.ts";
 import { parsePlan } from "../src/plan.ts";
@@ -19,6 +20,11 @@ function fences(markdown: string): { lang: string; body: string }[] {
 }
 
 describe("plugin", () => {
+  test("has lr's version, so a release updates both", async () => {
+    const manifest = JSON.parse(await read(".claude-plugin/plugin.json"));
+    expect(manifest.version).toBe(pkg.version);
+  });
+
   test("every lr command the skills mention exists", async () => {
     const docs = await Array.fromAsync(new Glob("skills/**/*.md").scan(PLUGIN));
     expect(docs.length).toBeGreaterThan(0);

@@ -1,6 +1,6 @@
 {
   "name": "local-review",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Local code review for agentic development, built on jj",
   "license": "Unlicense",
   "private": true,
