@@ -37,3 +37,5 @@ jobs:
       - run: jj --version
       - run: bun install --frozen-lockfile
       - run: bun run check
+      - run: bun run build
+      - run: scripts/smoke-test.sh dist/lr
