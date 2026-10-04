@@ -58,7 +58,7 @@ Usage:
   lr diff [<change>] [--from <n>] [--to <n>] [--name-only]
                                   what changed between rounds (default: since your last review)
   lr threads [--status <s,…> | --all] [--notes]
-  lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message>]
+  lr reply <thread> [--addressed|--resolve|--dismiss|--reopen|--accept] [<message> | -F <file>]
   lr final show                   the final commits (one per phase) and their drafts
   lr final message <group> -F <file>
   lr final pr-body -F <file>
@@ -200,6 +200,7 @@ const COMMANDS: Record<string, Handler> = {
     } as const;
     const { values, positionals } = parse(args, {
       ...flags,
+      ...FILE,
       message: { type: "string", short: "m" },
     });
     const actions = (Object.keys(flags) as ReplyAction[]).filter((a) => values[a]);
@@ -207,9 +208,13 @@ const COMMANDS: Record<string, Handler> = {
       throw new LrError(`pick one of ${actions.map((a) => `--${a}`).join(", ")}`);
     }
     const [id, ...words] = positionals;
+    const message = values.message ?? (words.length ? words.join(" ") : null);
+    if (values.file !== undefined && message !== null) {
+      throw new LrError("give the message as an argument or with -F, not both");
+    }
     return reply(ctx, id, {
       action: actions[0] ?? null,
-      body: values.message ?? (words.length ? words.join(" ") : null),
+      body: values.file !== undefined ? await ctx.readInput(values.file) : message,
     });
   },
   "final show": async (ctx, args) => {

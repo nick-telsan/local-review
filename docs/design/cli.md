@@ -14,7 +14,7 @@ Every command, who runs it, and what it does. `lr --help` has their options.
 | `lr review submit [-F <review.json>] [--verdict] [-m] [--round]`          | reviewer       | whole review, all comments at once (see [Review submissions](data-model.md#review-submissions))                   |
 | `lr handoff [--round] [--json]`                                          | author agent   | read the handoff                                                              |
 | `lr diff [<change>] [--from <n>] [--to <n>] [--name-only]`              | anyone         | what changed between rounds, change by change (see below)                     |
-| `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` | anyone | thread entry / status (see [Thread](data-model.md#thread))                                    |
+| `lr reply <thread> [--addressed\|--resolve\|--dismiss\|--reopen\|--accept] "<text>"` (or `-F <file>`) | anyone | thread entry / status (see [Thread](data-model.md#thread))                                    |
 | `lr threads [--status <s,…>\|--all] [--notes]`                           | anyone         | list threads, or notes                                                        |
 | `lr final show` · `lr final message <group> -F` · `lr final pr-body -F`  | author agent   | draft the final commits (see [Finalization](finalization.md))                                    |
 | `lr final cut <change> [--remove]`                                       | developer      | split a phase into more than one final commit                                 |

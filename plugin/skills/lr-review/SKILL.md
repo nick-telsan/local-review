@@ -74,6 +74,9 @@ lr reply <id> --resolve --as agent:claude-review                       # fixed
 lr reply <id> --reopen "<what's still wrong>" --as agent:claude-review # not fixed
 ```
 
+A longer message goes on stdin, with `-F -` and a quoted heredoc (`<<'EOF'`), so quotes and
+backticks in it reach lr as written.
+
 When the author pushed back (a reply on a thread that's still `open`), either agree and `--resolve`
 or `--dismiss` it, or reply with your reasoning. Leave other reviewers' threads to them; you can
 still reply.

@@ -240,7 +240,8 @@ proposed ──(human accepts)──► open ──(fixer: --addressed)──►
 - Only reviewers move threads to `resolved` / `dismissed`. The fixing agent can only mark
   `addressed`, or reply without changing status (that's how it pushes back).
 
-All of these go through `lr reply <thread> [<action>] [<message>]`:
+All of these go through `lr reply <thread> [<action>] [<message>]`. The message can come from a
+file instead, or stdin with `-F -`:
 
 | Action        | From                              | To          | Who                                      |
 | ------------- | --------------------------------- | ----------- | ---------------------------------------- |
