@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JJ_VERSION: 0.45.1
+  # sha256 of jj-v${JJ_VERSION}-x86_64-unknown-linux-musl.tar.gz, from the release's asset digests.
+  JJ_SHA256: f35438350b5d61963aac5dd74ede510b31d6b9690769d1a6268cf058cc825f72
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .tool-versions
+      - name: Install jj
+        run: |
+          archive="jj-v${JJ_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSLO "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/${archive}"
+          echo "${JJ_SHA256}  ${archive}" | sha256sum --check
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$archive" -C "$HOME/.local/bin" ./jj
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: jj --version
+      - run: bun install --frozen-lockfile
+      - run: bun run check
