@@ -82,7 +82,12 @@ export function FileDiffView({
     }
     return (
       <td className="num">
-        <button type="button" className="num-button" {...picker.button(side, n)}>
+        <button
+          type="button"
+          className="num-button"
+          aria-label={`${side === "old" ? "Old" : "New"} line ${n}`}
+          {...picker.button(side, n)}
+        >
           {n}
         </button>
       </td>
@@ -114,7 +119,7 @@ export function FileDiffView({
     );
 
   return (
-    <section className="file" id={`file-${encodeURIComponent(path)}`}>
+    <section className="file" id={`file-${encodeURIComponent(path)}`} aria-label={path}>
       <header className="file-head">
         <button
           type="button"
@@ -174,7 +179,7 @@ export function FileDiffView({
                         >
                           {numberCell(l, "old")}
                           {numberCell(l, "new")}
-                          <td className="code">
+                          <td className="code" data-testid="line-text">
                             <span className="sign">
                               {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
                             </span>
@@ -245,7 +250,7 @@ export function PlainDiff({ hunks }: { hunks: DiffHunk[] }) {
             )}
             {h.lines.map((l) => (
               <tr key={`${l.oldLine ?? ""}:${l.newLine ?? ""}`} className={`line ${l.kind}`}>
-                <td className="code">
+                <td className="code" data-testid="line-text">
                   <span className="sign">
                     {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
                   </span>

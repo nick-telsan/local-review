@@ -16,8 +16,20 @@ export function ActorName({ actor }: { actor: Actor }) {
   );
 }
 
-export function Pill({ kind, children }: { kind: string; children: ReactNode }) {
-  return <span className={`pill pill-${kind}`}>{children}</span>;
+export function Pill({
+  kind,
+  children,
+  testId,
+}: {
+  kind: string;
+  children: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <span className={`pill pill-${kind}`} data-testid={testId}>
+      {children}
+    </span>
+  );
 }
 
 const CHECK_ICON: Record<CheckRun["status"], string> = {

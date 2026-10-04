@@ -5,6 +5,8 @@ exact = true
 minimumReleaseAge = 259200 # seconds
 
 [test]
+# A bare `bun test` runs test/; the browser tests in e2e/ run with `bun run e2e`.
+root = "test"
 # Thresholds apply when coverage is on (`bun run test`); focused `bun test <file>` runs skip them.
 coverageThreshold = { lines = 0.9, functions = 0.9 }
 coverageSkipTestFiles = true

@@ -434,7 +434,7 @@ function FinalRound({ view }: { view: RoundView }) {
   const changes = new Map(view.round.changes.map((c) => [c.changeId, c]));
   return (
     <>
-      <section>
+      <section aria-label="Final commits">
         <h2>Final commits</h2>
         {final.groups.map((g) => (
           <div key={g.id} className="final-group">
@@ -458,7 +458,7 @@ function FinalRound({ view }: { view: RoundView }) {
           </div>
         ))}
       </section>
-      <section>
+      <section aria-label="PR body">
         <h2>PR body</h2>
         <TextLines
           text={final.prBody}

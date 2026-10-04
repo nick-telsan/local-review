@@ -157,7 +157,7 @@ function PhaseCard({
   );
 
   return (
-    <div className="phase-card">
+    <section className="phase-card" aria-label={`Phase ${phase.id}: ${phase.title}`}>
       <h3>
         <span className="phase-id">{phase.id}</span> {phase.title}{" "}
         <span className="bookmark mono">{phase.bookmark}</span>
@@ -209,7 +209,7 @@ function PhaseCard({
           <AddComment label="Comment on this phase" target={{ phase: phase.id }} />
         </>
       )}
-    </div>
+    </section>
   );
 }
 

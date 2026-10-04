@@ -142,14 +142,21 @@ export function TextLines({
                 >
                   <td className="num">
                     {review.canReview ? (
-                      <button type="button" className="num-button" {...picker.button("text", n)}>
+                      <button
+                        type="button"
+                        className="num-button"
+                        aria-label={`Line ${n}`}
+                        {...picker.button("text", n)}
+                      >
                         {n}
                       </button>
                     ) : (
                       n
                     )}
                   </td>
-                  <td className="code">{line}</td>
+                  <td className="code" data-testid="line-text">
+                    {line}
+                  </td>
                 </tr>
                 {after(n).length > 0 && (
                   <tr className="inline-threads">
