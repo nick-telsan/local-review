@@ -27,7 +27,7 @@ import type {
   Verdict,
 } from "../model.ts";
 import { type FileDiff, parsePatch } from "../patch.ts";
-import { parsePlan } from "../plan.ts";
+import { planBody } from "../plan.ts";
 
 export interface RoundSummary {
   n: number;
@@ -282,7 +282,7 @@ export async function planView(ctx: Context, slug: string, n: string): Promise<P
   for (let v = 1; v <= (feature.currentPlanVersion ?? 0); v++) {
     const plan = ctx.store.getPlanVersion(slug, v)!;
     const text = await Bun.file(join(ctx.featureDir(slug), plan.path)).text();
-    versions.push({ plan, text, body: parsePlan(text, slug).body });
+    versions.push({ plan, text, body: planBody(text) });
   }
   const phases = ctx.store.getPlanVersion(slug, round.planVersion)!.phases;
   return { version: round.planVersion, versions, coverage: coverage(round, phases) };

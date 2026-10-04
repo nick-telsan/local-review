@@ -85,13 +85,13 @@ async function run(cmd: string[], cwd: string): Promise<string> {
 export const TWO_PHASE_PLAN = `---
 phases:
   - id: 1
-    title: Schema
+    title: "Schema"
     bookmark: feat/1-schema
     tasks:
-      - { id: "1.1", title: Add table }
-      - { id: "1.2", title: Backfill }
+      - { id: "1.1", title: "Add table" }
+      - { id: "1.2", title: "Backfill" }
   - id: 2
-    title: Rotation
+    title: "Rotation"
     bookmark: feat/2-rotation
 ---
 # Plan
