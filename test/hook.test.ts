@@ -123,6 +123,76 @@ describe("lr hook pre-tool-use", () => {
     expect(humanClaim("lr ui --as sam")).toBe("human:sam");
     expect(humanClaim("lr uiux")).toBeNull();
   });
+
+  test("humanClaim reads lr's arguments, not the text in them", () => {
+    const user = `human:${process.env.USER ?? "unknown"}`;
+    for (const command of [
+      `lr reply 7 --addressed "docs/usage.md's Commands now opens with 'Yours': lr init, lr ui, lr status"`,
+      `lr reply 3 "use --as human:x"`,
+      `lr reply 3 --addressed "set LR_ACTOR=nick to test"`,
+      "lr reply 3 -F - <<'EOF'\nsee lr ui, or --as human:x\nEOF",
+      "lr status # not lr ui",
+      "lr note @- -- --as nick",
+      "jj describe -m 'lr ui'",
+      "echo sh",
+      // LR_ACTOR counts only where it's set, not in another program's arguments.
+      "grep -rn 'LR_ACTOR=human' docs",
+      "jj describe -m 'LR_ACTOR=nick is how a human acts'",
+      'jj file show -r 6e0c65bd src/commands/hook.ts | grep -n "LR_ACTOR=\\")\\|for (const w of at"',
+      "FOO=1 grep LR_ACTOR=nick x",
+    ]) {
+      expect([command, humanClaim(command)]).toEqual([command, null]);
+    }
+    for (const [command, actor] of [
+      ["cd x && lr ui", user],
+      ["bun run lr ui --no-open", user],
+      ["/usr/local/bin/lr review submit --verdict approved --as=nick", "human:nick"],
+      ["env LR_ACTOR=human:nick lr reply 3 --resolve", "human:nick"],
+      ["export LR_ACTOR='nick'; lr threads", "human:nick"],
+      ["declare -x LR_ACTOR=nick", "human:nick"],
+      ["FOO=1 LR_ACTOR=human:nick lr status", "human:nick"],
+      ["env -i FOO=1 LR_ACTOR=nick bash -c 'lr threads'", "human:nick"],
+      // After a keyword or a wrapper, before the program, it's still the program's environment.
+      ["for t in 1 2; do LR_ACTOR=nick lr reply $t --resolve; done", "human:nick"],
+      ["if LR_ACTOR=nick lr status; then :; fi", "human:nick"],
+      ["{ LR_ACTOR=nick lr status; }", "human:nick"],
+      ["! LR_ACTOR=nick lr status", "human:nick"],
+      ["time LR_ACTOR=nick lr status", "human:nick"],
+      ["while true; do export LR_ACTOR=nick; lr status; done", "human:nick"],
+      ["sudo LR_ACTOR=nick lr status", "human:nick"],
+      ["env -u FOO LR_ACTOR=nick lr status", "human:nick"],
+      ["LR_ACTOR=agent:a lr ui", null],
+    ] as const) {
+      expect([command, humanClaim(command)]).toEqual([command, actor]);
+    }
+  });
+
+  test("humanClaim follows the scripts a command runs", () => {
+    const user = `human:${process.env.USER ?? "unknown"}`;
+    expect(humanClaim("echo $(lr ui)")).toBe(user);
+    expect(humanClaim('echo "`lr reply 3 --as nick`"')).toBe("human:nick");
+    expect(humanClaim("sh -c 'cd x && lr ui'")).toBe(user);
+    expect(humanClaim(`bash -lc "eval 'lr threads --as sam'"`)).toBe("human:sam");
+    expect(humanClaim("xargs sh -c 'lr status'")).toBeNull();
+    expect(humanClaim("bash <<'EOF'\nlr ui\nEOF")).toBe(user);
+    expect(humanClaim("cat <<'EOF'\nlr ui\nEOF")).toBeNull();
+    expect(humanClaim("bash scripts/smoke-test.sh dist/lr")).toBeNull();
+    // Unquoted heredocs run their substitutions; process substitutions run too.
+    expect(humanClaim("cat <<EOF\n$(lr ui)\nEOF")).toBe(user);
+    expect(humanClaim("lr reply 3 -F - <<EOF\n`lr reply 4 --as nick`\nEOF")).toBe("human:nick");
+    expect(humanClaim("diff <(lr ui) x")).toBe(user);
+    expect(humanClaim("tee >(lr review submit --as nick)")).toBe("human:nick");
+    // A heredoc in a substitution can't hide what follows it.
+    expect(humanClaim(`jj describe -m "$(cat <<'EOF'\nit's done\nEOF\n)" && lr ui`)).toBe(user);
+    expect(humanClaim(`jj describe -m "$(cat <<'EOF'\nit's lr ui\nEOF\n)"`)).toBeNull();
+    // Text that ends inside a quote can't be read for certain, so the whole text is checked.
+    expect(humanClaim(`jj describe -m "it's && lr ui`)).toBe(user);
+    // A script from a pipe isn't in the command's words, so the whole text is checked.
+    expect(humanClaim("echo 'lr ui' | sh")).toBe(user);
+    expect(humanClaim("echo 'lr status' | sh -e")).toBeNull();
+    // Past a few levels of nesting, too.
+    expect(humanClaim(`${"eval ".repeat(10)}lr status --as sam`)).toBe("human:sam");
+  });
 });
 
 describe("lr hook stop", () => {

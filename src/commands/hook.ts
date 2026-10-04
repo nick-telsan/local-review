@@ -5,6 +5,7 @@ import { LrError } from "../errors.ts";
 import { Jj } from "../jj.ts";
 import type { Feature } from "../model.ts";
 import { repoDir } from "../paths.ts";
+import { splitCommand } from "../shell.ts";
 import { takeSnapshot } from "../snapshot.ts";
 import { roundPath, uiLink } from "../ui/running.ts";
 import { nextStep } from "./status.ts";
@@ -143,22 +144,114 @@ function preToolUse(input: HookInput, io: Io): number {
   return 0;
 }
 
-/** The human identity an lr command claims with `--as` or `LR_ACTOR` (or `lr ui`), if any. */
+/**
+ * The human identity a Bash command runs lr as, with `--as` or `LR_ACTOR` (or `lr ui`), if any.
+ * It reads the command as the shell would, so text in a quoted argument or a heredoc doesn't count.
+ */
 export function humanClaim(command: string): string | null {
-  const actors = [
-    ...command.matchAll(/\bLR_ACTOR=(["']?)([^\s"';&|]+)\1/g),
-    ...(/(^|[\s;&|(])lr\s/.test(command)
-      ? command.matchAll(/--as[=\s]+(["']?)([^\s"';&|]+)\1/g)
-      : []),
-  ].map((m) => m[2]!);
+  const claims: Claims = { actors: [], ui: false };
+  return claimed(collectClaims(command, claims, 0) ? claims : textClaims(command));
+}
+
+interface Claims {
+  /** Every `--as` given to lr, and every `LR_ACTOR` set. */
+  actors: string[];
+  /** Whether it runs `lr ui`. */
+  ui: boolean;
+}
+
+function claimed({ actors, ui }: Claims): string | null {
   const human = actors.find((a) => !a.startsWith("agent:"));
   if (human !== undefined) return human.includes(":") ? human : `human:${human}`;
   // `lr ui` acts as a person, the OS user unless told otherwise, whatever shell starts it.
-  if (/(^|[\s;&|(])lr\s+ui\b/.test(command) && actors.length === 0) {
-    return `human:${process.env.USER ?? "unknown"}`;
-  }
+  if (ui && actors.length === 0) return `human:${process.env.USER ?? "unknown"}`;
   return null;
 }
+
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const MAX_DEPTH = 8;
+
+/**
+ * Gather the claims of each lr call in a script, and in the scripts it runs: command
+ * substitutions, `sh -c`, `eval`, and heredocs fed to a shell. False when the script can't be
+ * read for certain: a shell runs a script that isn't in the text (`… | sh`), or the text ends
+ * inside a quote, substitution or heredoc. The caller then falls back to `textClaims`.
+ */
+function collectClaims(script: string, claims: Claims, depth: number): boolean {
+  if (depth > MAX_DEPTH) return false;
+  const { commands, substitutions, unterminated } = splitCommand(script);
+  if (unterminated) return false;
+  const scripts = [...substitutions];
+  for (const { words, stdin } of commands) {
+    // lr, a shell or eval can start anywhere in a command: `env … lr`, `bun run lr`, `xargs sh -c`.
+    const at = words.findIndex((w) => {
+      const name = basename(w);
+      return name === "lr" || name === "eval" || SHELLS.has(name);
+    });
+    // Before the program, a word can only be its environment (`sudo`, `env -u X`, `do`, `time`).
+    for (const w of at === -1 ? assignments(words) : words.slice(0, at)) {
+      if (w.startsWith("LR_ACTOR=") && w.length > "LR_ACTOR=".length) {
+        claims.actors.push(w.slice("LR_ACTOR=".length));
+      }
+    }
+    if (at === -1) continue;
+    const name = basename(words[at]!);
+    const args = words.slice(at + 1);
+    if (name === "lr") {
+      lrClaims(args, claims);
+    } else if (name === "eval") {
+      scripts.push(args.join(" "));
+    } else {
+      const c = args.findIndex((a) => /^-[a-z]*c[a-z]*$/i.test(a));
+      if (c !== -1) scripts.push(args[c + 1] ?? "");
+      else if (stdin.length > 0) scripts.push(...stdin);
+      // A shell with no script file reads one from a pipe.
+      else if (args.every((a) => a.startsWith("-"))) return false;
+    }
+  }
+  return scripts.every((s) => collectClaims(s, claims, depth + 1));
+}
+
+const SETTERS = new Set(["env", "export", "declare", "typeset", "local", "readonly"]);
+const KEYWORDS = new Set(["!", "{", "time", "if", "then", "elif", "else", "do", "while", "until"]);
+
+/**
+ * The assignments a command makes: before its program, or as the arguments of `env`, `export` and
+ * the like. Elsewhere, such as in grep's pattern, `NAME=value` is text.
+ */
+function assignments(words: string[]): string[] {
+  const found: string[] = [];
+  for (const w of words) {
+    if (KEYWORDS.has(w) || SETTERS.has(basename(w)) || w.startsWith("-")) continue;
+    if (!/^[A-Za-z_]\w*=/.test(w)) break;
+    found.push(w);
+  }
+  return found;
+}
+
+/** An lr call's own claims: `--as` among its options (before any `--`), and `lr ui`. */
+function lrClaims(args: string[], claims: Claims): void {
+  const end = args.indexOf("--");
+  const own = end === -1 ? args : args.slice(0, end);
+  if (own[0] === "ui") claims.ui = true;
+  own.forEach((a, i) => {
+    if (a === "--as" && i + 1 < own.length) claims.actors.push(own[i + 1]!);
+    else if (a.startsWith("--as=")) claims.actors.push(a.slice("--as=".length));
+  });
+}
+
+/** Claims found by matching the whole text, for scripts lr can't see. Errs toward asking. */
+function textClaims(command: string): Claims {
+  return {
+    actors: [
+      ...command.matchAll(/\bLR_ACTOR=(["']?)([^\s"';&|]+)\1/g),
+      ...(/\blr\s/.test(command) ? command.matchAll(/--as[=\s]+(["']?)([^\s"';&|]+)\1/g) : []),
+    ].map((m) => m[2]!),
+    ui: /\blr\s+ui\b/.test(command),
+  };
+}
+
+const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
 
 /**
  * Remind the author to open a review round when it stops after changing the stack in this session,
